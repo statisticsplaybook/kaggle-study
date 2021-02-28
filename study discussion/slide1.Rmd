@@ -97,11 +97,17 @@ class: center, middle
 
 # 발표 순서 (10회)
 
+1회 25분 기준, 2명씩
 
-* 3월 6일
-* 3월 13일
-* 3월 20일
+.pull-left[
+
+* 3월 6일: 성균님(tidymodel walmart), 코니님 (walmart EDA)
+* 3월 13일:
+* 3월 20일: 상훈님
 * 3월 27일
+
+]
+.pull-right[
 
 * 4월 3일
 * 4월 10일
@@ -110,6 +116,10 @@ class: center, middle
 
 * 5월 1일
 * 5월 8일
+
+]
+
+
 
 ---
 

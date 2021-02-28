@@ -33,6 +33,8 @@ all_data %>%
            month = month(date)) %>% 
     select(-c(date)) -> all_data2
 
+all_data2 %>% head()
+
 walmart_recipe <- 
     recipe(weekly_sales ~ .,
            data = all_data2) %>% 
@@ -46,9 +48,10 @@ all_data2 <- bake(walmart_recipe,
                   new_data = all_data2)
 names(all_data2)
 head(all_data2)
-# View(all_data2)
+View(all_data2)
 
 # train, test
+
 train_index <- seq_len(nrow(train))
 train2 <- all_data2[train_index,]
 test2 <- all_data2[-train_index,]
