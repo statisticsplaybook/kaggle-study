@@ -4,8 +4,8 @@ library(lubridate)
 library(skimr)
 library(magrittr)
 
-train <- read_csv("./walmart/train.csv.zip")
-test <- read_csv("./walmart/test.csv.zip")
+train <- read_csv("./data/walmart/train.csv.zip")
+test <- read_csv("./data/walmart/test.csv.zip")
 
 
 # size of data
@@ -70,8 +70,8 @@ lm_form_fit
 
 result <- predict(lm_form_fit, new_data = test2)
 
-subfile <- read_csv("./walmart/sampleSubmission.csv.zip")
+subfile <- read_csv("./data/walmart/sampleSubmission.csv.zip")
 subfile$Weekly_Sales <- result$.pred
 
 write.csv(subfile, row.names = FALSE,
-          "./walmart/baseline-lm-02262021.csv")
+          "./data/walmart/baseline-lm-02262021.csv")
