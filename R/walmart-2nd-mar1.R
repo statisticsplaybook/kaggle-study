@@ -31,10 +31,9 @@ all_data %>% skim()
 
 all_data %>% 
     mutate( year = year(date),
-           month = as_factor(month(date)), # not so good?
+           month = month(date), # not so good?
            store = as_factor(store),
-           dept = as_factor(dept)
-    ) %>% 
+           dept = as_factor(dept)) %>% 
     select(-c(date)) -> all_data2
 
 all_data2 %>% 
