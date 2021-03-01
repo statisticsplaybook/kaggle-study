@@ -1,0 +1,148 @@
+
+title: "introduction `tidymodels` with walmart data"
+author: "류성균"
+date: '2021 3 6 '
+output: html_document
+---
+
+- reference :
+    - []()
+    - []()
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(lubridate)
+library(skimr)
+library(magrittr)
+library(here)
+```
+
+
+### Tidymodels
+ - 소개
+
+### Walmart
+```{r}
+train <- read_csv(here("walmart/train.csv.zip"))
+test <- read_csv(here("walmart/test.csv.zip"))
+```
+
+```{r}
+# size of data
+skim(train)
+```
+
+```{r}
+skim(test)
+```
+
+```{r}
+train %>% 
+    select(Date, Weekly_Sales) %>% 
+    ggplot(aes(x = Date, y = Weekly_Sales)) + 
+    geom_line()
+```
+
+```{r}
+# set.seed(1234)
+# data_split <- initial_split(train, prop = 3/4, strata = IsHoliday)
+# data_split
+# 
+# train_data <- training(data_split)
+# val_data <- testing(data_split)
+```
+
+```{r}
+# cv_train <- vfold_cv(train, v = 10, repeats = 1)
+# cv_train
+```
+
+```{r}
+all_data <- bind_rows(train, test)
+all_data <- all_data %>% janitor::clean_names()
+
+# train %<>% janitor::clean_names() %>% 
+#     mutate(
+#     store = as.factor(store),
+#     dept = as.factor(dept)
+# )
+
+# test %<>% janitor::clean_names() %>% 
+#     mutate(
+#     store = as.factor(store),
+#     dept = as.factor(dept)
+# )
+
+all_data %<>% mutate(
+    store = as.character(store),
+    dept = as.character(dept)
+)
+# names(all_data)
+
+# all_data %>% head()
+# all_data %>% skim()
+
+# all_data %>% 
+#     mutate(year = year(date),
+#            month = month(date)) %>% 
+#     select(-c(date)) -> all_data2
+```
+
+
+### Preprocess interface
+
+
+ - recipe
+ - prep
+ - step
+    - step_corr()
+    - step_center
+    - step_scale
+    
+
+```{r}
+walmart_rec <- all_data %>% 
+    filter(!is.na(weekly_sales)) %>% 
+    recipe(weekly_sales ~ .) %>% 
+        step_date(date, features = c("year", "month", "dow")) %>% 
+    step_rm(date)  %>% 
+    step_center(all_numeric(), -all_outcomes()) %>% 
+    step_scale(all_numeric(), -all_outcomes()) %>% 
+    step_dummy(all_nominal()) %>% 
+    prep()
+
+walmart_rec %>% print()
+```
+```{r}
+train_final <- juice(walmart_rec)
+```
+
+
+
+```{r}
+lm_model <- 
+    linear_reg() %>% 
+    set_engine("lm")
+```
+
+
+```{r}
+walmart_wflow <- workflow() %>% 
+    add_model(lm_model) %>% 
+    add_recipe(walmart_rec)
+
+walmart_wflow
+```
+
+
+```{r}
+walmart_lmfit <- walmart_wflow %>% 
+    fit(all_data %>% 
+    filter(!is.na(weekly_sales)))
+```
+
