@@ -8,8 +8,9 @@ output: html_document
 - cv는 어떻게?
 
 - reference :
-    - []()
-    - []()
+    - [A Gentle Introduction to tidymodels](https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/)
+    - [왜 당근(caret)은 안되고 새로운 신상 당근(Tidymodel)인가?](https://statkclee.github.io/ds-authoring/ds-why-tidymodels.html#/predictive-model)
+    - ['4   Tune model parameters' IN Tidymodels GET STARTED](https://www.tidymodels.org/start/tuning/)
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -219,3 +220,114 @@ write.csv(subfile, row.names = FALSE,
 
 
 ### cv in random forest
+
+```{r}
+tune_spec <-
+    decision_tree( ## decision_tree가 어떤건지 확인해봐야
+        cost_complexity = tune(),
+        tree_depth = tune(),
+    ) %>% 
+    set_engine("rpart") %>% 
+    set_mode("regression")
+
+
+tune_spec
+```
+
+```{r}
+tree_grid <- grid_regular(cost_complexity(),
+                          tree_depth(),
+                          levels = 5
+)
+
+tree_grid
+
+# tree_grid %>% count(cost_complexity)
+# tree_grid %>% count(tree_depth)
+```
+
+```{r}
+set.seed(1234)
+walmart_folds <- vfold_cv(train, strata = is_holiday)
+
+# walmart_folds
+```
+```{r}
+set.seed(2345)
+
+tree_wf <- workflow() %>% 
+    add_model(tune_spec) %>% 
+    add_recipe(walmart_recipe)
+```
+
+```{r}
+walmart_treefit <- 
+    tree_wf %>% 
+    tune_grid(
+        resamples = walmart_folds,
+        grid = tree_grid
+    )
+
+
+walmart_treefit
+```
+
+```{r}
+walmart_treefit %>% 
+    collect_metrics()
+```
+
+```{r}
+# walmart_treefit %>% 
+#     collect_metrics() %>% 
+#     mutate(tree_depth = factor(tree_depth)) %>% 
+#     ggplot(aes(cost_complexity, mean, color = tree_depth)) + 
+#     geom_line(alpha = 0.7) +
+#     geom_point(size = 2)
+```
+```{r}
+best_tree <- walmart_treefit %>% 
+    select_best("rmse")
+
+best_tree
+```
+
+```{r}
+final_walmart_tree <-
+    tree_wf %>% 
+    finalize_workflow(best_tree)
+
+final_walmart_tree
+```
+
+```{r}
+walmart_treefit2 <- 
+    final_walmart_tree %>% 
+    fit(data = train_wal)
+```
+
+```{r}
+walmart_treefit2 %>% 
+    predict(val_wal) %>% 
+    bind_cols(val_wal) %>%  select(weekly_sales,.pred) %>% 
+    metrics(truth = weekly_sales, estimate = .pred)
+```
+- issac's baseline : 20660.01047
+- dummy 20726.42410
+- rf dummy : 20828.82319
+- tree cv : 20780.52340
+```{r}
+subfile <- read_csv(here("walmart/sampleSubmission.csv.zip"))
+subfile$Weekly_Sales <- walmart_treefit2 %>% 
+    predict(test) %>% 
+    select(.pred) %>% unlist()
+
+subfile
+# write.csv(subfile, row.names = FALSE,
+#           "./walmart/baseline-lm-02262021.csv")
+
+write.csv(subfile, row.names = FALSE,
+          here("walmart/baseline-tree-cv.csv"))
+
+```
+
