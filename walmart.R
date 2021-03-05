@@ -63,7 +63,7 @@ lm_form_fit <-
     lm_model %>% 
     fit(weekly_sales ~ ., data = train2)
 
-lm_form_fit
+tidy(lm_form_fit)
 
 result <- predict(lm_form_fit, new_data = test2)
 

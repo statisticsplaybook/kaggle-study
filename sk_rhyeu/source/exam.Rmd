@@ -1,4 +1,4 @@
-
+---
 title: "introduction `tidymodels` with walmart data"
 author: "류성균"
 date: '2021 3 6 '
@@ -6,96 +6,69 @@ output: html_document
 ---
 
 - reference :
-    - []()
-    - []()
+    - [A Gentle Introduction to tidymodels](https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/)
+    - [왜 당근(caret)은 안되고 새로운 신상 당근(Tidymodel)인가?](https://statkclee.github.io/ds-authoring/ds-why-tidymodels.html#/predictive-model)
+    - ['4   Tune model parameters' IN Tidymodels GET STARTED](https://www.tidymodels.org/start/tuning/)
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r, echo = FALSE}
 library(tidyverse)
 library(tidymodels)
 library(lubridate)
-library(skimr)
 library(magrittr)
+library(plotly)
 library(here)
+library(vip)
+# library(knitr)
+
 ```
 
 
 ### Tidymodels
  - 소개
-
+    - recipe ~ prep
+    - workflow()
+    - hyperparameter tuning with cv
+    
 ### Walmart
 ```{r}
 train <- read_csv(here("walmart/train.csv.zip"))
 test <- read_csv(here("walmart/test.csv.zip"))
 ```
 
-```{r}
-# size of data
-skim(train)
-```
 
 ```{r}
-skim(test)
+train %<>% janitor::clean_names()
+test %<>% janitor::clean_names()
 ```
+
 
 ```{r}
 train %>% 
-    select(Date, Weekly_Sales) %>% 
-    ggplot(aes(x = Date, y = Weekly_Sales)) + 
-    geom_line()
+    select(date, weekly_sales) %>% 
+    ggplot(aes(x = date, y = weekly_sales)) + 
+    geom_line() -> p
+
+ggplotly(p)
 ```
 
 ```{r}
-# set.seed(1234)
-# data_split <- initial_split(train, prop = 3/4, strata = IsHoliday)
-# data_split
-# 
-# train_data <- training(data_split)
-# val_data <- testing(data_split)
-```
+set.seed(1234)
+# walmart_split <- initial_split(train, prop = 0.7, strata = is_holiday)
 
-```{r}
-# cv_train <- vfold_cv(train, v = 10, repeats = 1)
-# cv_train
-```
+# walmart_split <- validation_split(train, 
+#                                   strata = is_holiday, 
+#                                   prop = 0.7)
+walmart_split
 
-```{r}
-all_data <- bind_rows(train, test)
-all_data <- all_data %>% janitor::clean_names()
 
-# train %<>% janitor::clean_names() %>% 
-#     mutate(
-#     store = as.factor(store),
-#     dept = as.factor(dept)
-# )
-
-# test %<>% janitor::clean_names() %>% 
-#     mutate(
-#     store = as.factor(store),
-#     dept = as.factor(dept)
-# )
-
-all_data %<>% mutate(
-    store = as.character(store),
-    dept = as.character(dept)
-)
-# names(all_data)
-
-# all_data %>% head()
-# all_data %>% skim()
-
-# all_data %>% 
-#     mutate(year = year(date),
-#            month = month(date)) %>% 
-#     select(-c(date)) -> all_data2
 ```
 
 
 ### Preprocess interface
-
 
  - recipe
  - prep
@@ -106,43 +79,80 @@ all_data %<>% mutate(
     
 
 ```{r}
-walmart_rec <- all_data %>% 
-    filter(!is.na(weekly_sales)) %>% 
+walmart_recipe <- train_data %>% 
     recipe(weekly_sales ~ .) %>% 
-        step_date(date, features = c("year", "month", "dow")) %>% 
+        step_date(date, features = c("month")) %>% 
     step_rm(date)  %>% 
-    step_center(all_numeric(), -all_outcomes()) %>% 
-    step_scale(all_numeric(), -all_outcomes()) %>% 
-    step_dummy(all_nominal()) %>% 
-    prep()
+    step_mutate(
+             store = as.factor(store),
+             dept = as.factor(dept)
+            # , date_year = as.factor(date_year)
+            ) %>% 
+    step_dummy(all_nominal(), -all_outcomes()) %>% prep()
 
-walmart_rec %>% print()
+walmart_recipe %>% print()
 ```
 ```{r}
-train_final <- juice(walmart_rec)
+train_final <- juice(walmart_recipe)
+
+train_final %>% colnames()
+train_final %>% head() %>% kable()
 ```
-
-
 
 ```{r}
-lm_model <- 
-    linear_reg() %>% 
-    set_engine("lm")
+walmart_recipe %>% 
+    bake(val_data) %>% 
+    colnames()
 ```
 
+```{r}
+# walmart_recipe %>% 
+    # bake(test) %>% 
+    # head() %>% knitr::kable()
+```
+
+### random Forest
+
+```{r}
+rf_model <- 
+    rand_forest() %>% 
+    set_engine("ranger", seed = 1234) %>% 
+    set_mode("regression")
+```
 
 ```{r}
 walmart_wflow <- workflow() %>% 
-    add_model(lm_model) %>% 
-    add_recipe(walmart_rec)
+    add_model(rf_model) %>% 
+    add_recipe(walmart_recipe)
 
 walmart_wflow
 ```
 
 
 ```{r}
-walmart_lmfit <- walmart_wflow %>% 
-    fit(all_data %>% 
-    filter(!is.na(weekly_sales)))
+walmart_rffit <- walmart_wflow %>% 
+    fit(train_data)
 ```
 
+
+
+```{r}
+walmart_rffit %>% 
+    predict(val_data) %>% 
+    bind_cols(val_data) %>%  select(weekly_sales,.pred) %>% 
+    metrics(truth = weekly_sales, estimate = .pred)
+```
+
+```{r}
+subfile2 <- read_csv(here("walmart/sampleSubmission.csv.zip"))
+subfile2$Weekly_Sales <- walmart_rffit %>% 
+    predict(test) %>% 
+    select(.pred) %>% unlist()
+
+subfile2
+# write.csv(subfile, row.names = FALSE,
+#           "./walmart/baseline-lm-02262021.csv")
+
+write.csv(subfile2, row.names = FALSE,
+          here("walmart/baseline-rf-dummy.csv"))
+```
