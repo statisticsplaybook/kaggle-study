@@ -4,8 +4,8 @@ library(lubridate)
 library(skimr)
 library(magrittr)
 
-train <- read_csv("./walmart/train.csv.zip")
-test <- read_csv("./walmart/test.csv.zip")
+train <- read_csv("./data/walmart/train.csv.zip")
+test <- read_csv("./data/walmart/test.csv.zip")
 
 
 # size of data
@@ -33,6 +33,8 @@ all_data %>%
            month = month(date)) %>% 
     select(-c(date)) -> all_data2
 
+all_data2 %>% head()
+
 walmart_recipe <- 
     recipe(weekly_sales ~ .,
            data = all_data2) %>% 
@@ -46,9 +48,10 @@ all_data2 <- bake(walmart_recipe,
                   new_data = all_data2)
 names(all_data2)
 head(all_data2)
-# View(all_data2)
+View(all_data2)
 
 # train, test
+
 train_index <- seq_len(nrow(train))
 train2 <- all_data2[train_index,]
 test2 <- all_data2[-train_index,]
@@ -67,10 +70,10 @@ tidy(lm_form_fit)
 
 result <- predict(lm_form_fit, new_data = test2)
 
-subfile <- read_csv("./walmart/sampleSubmission.csv.zip")
+subfile <- read_csv("./data/walmart/sampleSubmission.csv.zip")
 subfile$Weekly_Sales <- result$.pred
 
 subfile
 
 write.csv(subfile, row.names = FALSE,
-          "./walmart/baseline-lm-02262021.csv")
+          "./data/walmart/baseline-lm-02262021.csv")
