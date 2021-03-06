@@ -34,8 +34,8 @@ here()
 
 ## Walmart mothership Data
 ```{r}
-train <- read_csv(here("walmart/train.csv.zip"))
-test <- read_csv(here("walmart/test.csv.zip"))
+train <- read_csv(here("data/walmart/train.csv.zip"))
+test <- read_csv(here("data/walmart/test.csv.zip"))
 ```
 
 
