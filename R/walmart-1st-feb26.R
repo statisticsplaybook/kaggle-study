@@ -66,12 +66,14 @@ lm_form_fit <-
     lm_model %>% 
     fit(weekly_sales ~ ., data = train2)
 
-lm_form_fit
+tidy(lm_form_fit)
 
 result <- predict(lm_form_fit, new_data = test2)
 
 subfile <- read_csv("./data/walmart/sampleSubmission.csv.zip")
 subfile$Weekly_Sales <- result$.pred
+
+subfile
 
 write.csv(subfile, row.names = FALSE,
           "./data/walmart/baseline-lm-02262021.csv")
