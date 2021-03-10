@@ -3,7 +3,8 @@ library(tidymodels)
 library(lubridate)
 library(skimr)
 library(magrittr)
-
+library(probably)
+library(gt)
 
 # Store - the store number
 # Dept - the department number
@@ -27,120 +28,117 @@ test <- read_csv("./data/walmart/test.csv.zip")
 stores <- read_csv("./data/walmart/stores.csv")
 features <- read_csv("./data/walmart/features.csv.zip")
 
-
-# overview 
-
-train %>% head()
-test %>% head()
-stores %>% head()
-features %>% head()
-features %>% tail()
+DataExplorer::plot_intro(train)
 
 
-
-# alldata combine : train, test 전부 전처리하고 시작 
-
-all_data <- bind_rows(train, test) # 없는 변수는 NA 처리. rbind는 error 뜸 
-all_data <- all_data %>% janitor::clean_names() # 변수 이름 소문자로 전환. 
+train <- train %>% janitor::clean_names() 
+test <- test %>% janitor::clean_names() 
 features <- features %>% janitor::clean_names()
 stores <- stores %>% janitor::clean_names()
 
-features <- features %>% left_join(stores, by = 'store')
 
-names(all_data)
-names(features)
+features <- features %>% left_join(stores, by = 'store') 
 
-all_data %>% head()
-all_data %>% skim() # n_missing : NA 개수, n_unique : unique 개수 
-
-# 
-# all_data <- all_data %>% 
-#     mutate(year = year(date),
-#            month = month(date), 
-#            day = day(date),
-#            weekday = weekdays(date)) %>% 
-#     select(-c(date)) %>% 
-#     select(year, month, day, weekday, everything()) %>% 
-#     arrange(year, month, day, weekday, store, dept)
-# 
-# all_data %>% head()
-# 
-# 
-# features <- features %>%
-#     mutate(year = year(date),
-#            month = month(date), 
-#            day = day(date), 
-#            weekday = weekdays(date)) %>% 
-#     select(-c(date)) %>% 
-#     select(year, month, day, weekday, everything()) %>% 
-#     arrange(year, month, day, weekday, store)
-
-
+# mark_down의 결측치 비율
 features %>% select(starts_with('mark_down')) %>%
-    summary()
+    summarise(across(.fns = ~sum(is.na(.))/length(.)))
+
+# 각 mark_down 별 평균 
+features %>% select(starts_with('mark_down')) %>%
+    summarise(across(.fns = ~mean(., na.rm = T)))
 
 
+train <- left_join(train, features, by = c('store', 'date', 'is_holiday'))
+test <- left_join(test, features, by = c('store', 'date', 'is_holiday'))
+
+train <- train %>% select(-starts_with('mark'))
+test <- test %>% select(-starts_with('mark'))
 
 
-# all_data %>% inner_join(features, by = c('year', 'month', 'weekday', 'store')) %>% head(n = 20)
-
-
-# step_corr() - Removes variables that have large absolute correlations with other variables
-# step_center() - Normalizes numeric data to have a mean of zero
-# step_scale() - Normalizes numeric data to have a standard deviation of one
-# step_log() - step_log(변수, base = 10)
-# step_dummy(all_nominal()) - 더미변수 처리, all_nominal() : factor or character columns 모두 지정 
-# all_numeric(), all_predictors(), all_outcomes()
-
+# preprocessing 
 
 walmart_recipe <- 
     recipe(weekly_sales ~ .,
-           data = all_data) %>%
-    step_date(date, features = c('dow', 'month', 'year'), label = T) %>% # dow = day of week, abbr = Sunday or Sun, label = Sunday or number
-    step_holiday(date, holidays = timeDate::listHolidays('US')) %>% 
-    step_rm(date) %>% # we remove the original date variable since we no longer want it in the model.
+           data = train) %>%
+    step_date(date, features = c('month')) %>% 
+    step_rm(date) %>%
+    step_mutate(store = as.factor(store), 
+                dept = as.factor(dept)) %>%
     step_dummy(all_nominal()) %>% 
-    step_normalize(all_numeric(), -all_outcomes()) # weekly sales는 normalize x, 나머지는 normalize o 
-walmart_recipe
-
-walmart_recipe <- prep(walmart_recipe, training = all_data2) # preperation ?
-walmart_recipe
-
-all_data2 <- bake(walmart_recipe, 
-                  new_data = all_data2) # 실제 전처리 실시 
-names(all_data2)
-head(all_data2)
-View(all_data2)
+    step_normalize(all_numeric(), -all_outcomes())
 
 
+walmart_recipe %>% juice()
 
-# train, test
 
-train_index <- seq_len(nrow(train))
-train2 <- all_data2[train_index,]
-test2 <- all_data2[-train_index,]
+# https://www.hfshr.xyz/posts/2020-05-23-tidymodel-notes/
 
-train2 %>% dim()
+mod <- boost_tree(
+    trees = 1000,
+    min_n = tune(),
+    learn_rate = tune(),
+    loss_reduction = tune(),
+    sample_size = tune(),
+    mtry = tune(),
+    tree_depth = tune()
+) %>%
+    set_engine("xgboost") %>%
+    set_mode("regression")
 
-lm_model <- 
-    linear_reg() %>% 
-    set_engine("lm")
 
-lm_form_fit <- 
-    lm_model %>% 
-    fit(weekly_sales ~ ., data = train2)
+params <- parameters(mod) %>%
+    finalize(train)
 
-lm_form_fit
+xgboost_wflow <- workflow() %>%
+    add_recipe(walmart_recipe) %>%
+    add_model(mod)
 
-result <- predict(lm_form_fit, new_data = test2)
+
+options(tidymodels.dark = TRUE)
+cl <- makePSOCKcluster(6)
+registerDoParallel(cl)
+
+folds <- vfold_cv(train, v = 5)
+
+tuned <- tune_bayes(
+    object = xgboost_wflow,
+    resamples = folds,
+    param_info = params,
+    iter = 30,
+    metrics =  metric_set(rmse, mape),
+    initial = 10,
+    control = control_bayes(
+        verbose = TRUE,
+        no_improve = 10,
+        seed = 123
+    )
+)
+
+show_best(tuned, 'rmse') %>% 
+    select(1:7, 11) %>% 
+    gt()
+
+
+best_model <- select_best(tuned, "rmse")
+
+final_model <- finalize_model(mod, best_model)
+walmart_workflow <- xgboost_wflow %>% update_model(final_model)
+xgb_fit <- fit(walmart_workflow, data = train)
+
+
+pred <- 
+    predict(xgb_fit, test) %>% 
+    mutate(modelo = "XGBoost")
+
+pred
 
 subfile <- read_csv("./data/walmart/sampleSubmission.csv.zip")
 subfile
 
-subfile$Weekly_Sales <- result$.pred
+subfile$Weekly_Sales <- pred$.pred
 
 write.csv(subfile, row.names = FALSE,
-          "./data/walmart/baseline-lm-02262021.csv")
+          "./data/walmart/xgboost_bayes_result.csv")
 
 
 

@@ -1,0 +1,258 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+# tidymodel tutorial
+
+tidymodel 설명
+
+```{r, warning=F, message=F, include=F}
+library(modeldata)
+library(tidymodels)
+library(tidyverse)
+library(lubridate)
+library(magrittr)
+```
+
+```{r}
+data(ames)
+```
+
+```{r}
+theme_set(theme_bw())
+ggplot(ames, aes(x = Sale_Price)) + 
+  geom_histogram(bins = 50)
+```
+
+```{r}
+ames <- ames %>% mutate(Sale_Price = log10(Sale_Price))
+ames %>% head()
+```
+
+## Data split
+
+-   prop : training data 비율
+-   strata : classification 문제에서 범주 간 불균형 문제를 해결하기 위해 층을 나누고 샘플링 진행. regression 문제에서는 사분위수를 기준으로 나누고 샘플링 진행
+
+```{r}
+set.seed(123)
+ames_split <- initial_split(ames, prop = 0.8, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+```
+
+## Feature engineering
+
+tidymodel 패키지는 복잡한 데이터 전처리 과정을 간소화시키기 위해서 총 3단계의 데이터 전처리 프로세스를 도입했다. 각 단계는 recipe(요리 방식을 정의하는 단계), prep(요리 재료를 준비하는 단계), bake(요리를 하는 단계)로 구성된다.
+
+각 단계별로 살펴보면 첫 번째로, recipe는 사전에 처리할 함수를 정의하는 단계이다. recipe와 연동되는 데이터 전처리에 필요한 함수가 사전 정의되어 있으며, 이를 이용해서 데이터 전처리 과정을 정의한다. 두 번째로, prep은 training set으로 부터 recipe에서 정의한 데이터 전처리 과정을 계산하는 단계이다. 계산 결과를 바로 output으로 출력할 수 없고 bake 함수를 이용해야만 output이 출력된다. bake는 data set에 적용한 prep을 적용해서 output으로 도출하는 단계이다.
+
+사실 사용하면서 데이터 전처리 과정을 사전 정의한다는 개념이 익숙하지 않았는데 각 단계별 세부 내용을 기술하면서 나름의 이유를 설명해보도록 하겠다.
+
+### Recipe
+
+데이터 전처리를 위한 단계를 정의하는 object이다. 특이한 점은 즉시 실행되지 않고 단계를 **정의**만한다는 것이다. 왜 번거롭게 recipe를 사용해야 하는지 의문이 생길 수 있다.
+
+Recipe의 장점은 다음과 같다.
+
+-   recipe object를 여러가지 모델에 재사용 가능
+
+-   recipe 내에 사전 정의된 함수를 이용하면 코드의 간결성 확보 가능
+
+즉, recipe를 이용해서 사전 정의된 object는 linear regression, random forest, xgboost 등등 tidymodel과 연동된 여러가지 모델에 대해 동일하게 적용할 수 있다. 또 recipe에는 생각보다 다양한 데이터 전처리 관련 함수가 있는데 이를 이용하면 기존에 각 변수별로 정의를 해주어야했던 데이터 전처리 과정을 간결하고 가독성 있는 코드로 구현이 가능하다.
+
+세부적인 recipe 내에 step_fun은 다음과 같다.
+
+-   Normalization
+
+    <div>
+
+    -   step_center(var) - 평균을 빼서 중심 이동
+    -   step_normalize(var) - 평균 빼고, 분산으로 나눠서 표준화
+
+    </div>
+
+-   Filters
+
+    <div>
+
+    -   step_corr(threshold = 0.9) - 상관계수의 절대값이 큰 변수 제거
+
+    -   step_rm(var) - 지정된 변수 제거
+
+    -   step_zv() - 분산이 0인 변수 제거
+
+    -   step_nzv() - 값이 거의 0인 변수 제거
+
+    </div>
+
+-   Transformations
+
+    <div>
+
+    -   step_log(var, base = exp(1) ) - 변수 로그 변환
+
+    -   step_logit(var) - 변수 로짓 변환
+
+    -   step_poly(var, degree = 2) - 변수에 polynomial term 추가(I()가 아닌 poly()와 동일, 즉 orthogonal polynomial 이용)
+
+    -   step_BoxCox() - 변수 Boxcox 변환
+
+    ```{r}
+    examples <- data.frame(matrix(runif(40), ncol = 2))
+    rec <- recipe(~ X1 + X2, data = examples)
+    rec %>% 
+        step_logit(all_predictors()) %>% 
+        prep() %>% 
+        bake(examples)
+    ```
+
+    </div>
+
+-   Discretization
+
+    <div>
+
+    -   step_discretize(var, num_breaks = 4) - 연속형 변수 이산형으로 변환
+
+    -   step_cut() - 연속형 변수를 지정한 값을 기준으로 이산형으로 변환
+
+        <div>
+
+        -   include_outside_range - 지정한 범위를 넘어선 값을 양끝 break에 포함시킬지 여부. default = FALSE이며 결측치 처리됨
+
+        -   breaks - 절단 기준이 되는 값
+
+        </div>
+
+    ```{r}
+    df <- data.frame(x = 1:10, y = 5:14)
+    rec <- recipe(df)
+    rec %>%
+        step_cut(x, y, breaks = c(6, 9), include_outside_range = TRUE) %>%
+        prep() %>%
+        bake(df)
+    ```
+
+    </div>
+
+-   Dummy variables and encodings
+
+    <div>
+
+    -   step_date() - date 변수에서 year, month, day of week 변수를 새롭게 생성
+
+        -   feature = c('dow', 'month', 'year') - 요일, 달, 연도 변수 추가
+
+        -   abbr = T - Sunday or Sun
+
+        -   label = Sunday or number
+
+    -   step_holiday() - date 변수에서 공휴일에 관한 이진변수 새롭게 생성
+
+        <div>
+
+        -   holidays = c('LaborDay', 'NewYearDay', 'ChristmasDay')
+
+        -   holidays = timeDate::listHolidays('US')
+
+        </div>
+
+    ```{r}
+    examples <- data.frame(someday = ymd("2000-12-20") + days(0:40))
+    holiday_rec <- recipe(~ someday, examples) %>%
+        step_holiday(all_predictors())
+    
+    holiday_rec <- prep(holiday_rec, training = examples)
+    holiday_values <- bake(holiday_rec, new_data = examples)
+    holiday_values
+    ```
+
+    -   step_dummy() - character or factor 변수를 더미변수로 변환
+
+        <div>
+
+        -   one_hot = TRUE - C +1개의 더미변수 생성(one_hot = F: C-1개 더미변수 생성
+
+        </div>
+
+    ```{r}
+    iris <- iris %>% mutate(original = Species)
+    iris_rec <- recipe( ~ ., data = iris)
+    ref_cell <- 
+      iris_rec %>% 
+      step_dummy(Species) %>%
+      prep(training = iris)
+
+    juice(ref_cell, original, starts_with("Species")) %>%
+        distinct()
+    ```
+
+    -   step_other() - 범주형 변수의 level이 여러개일 때, 하위 범주를 기타로 묶음
+
+        <div>
+
+        -   threshold = 0.05 - 하위 5% 범주는 기타로 묶임
+
+        -   other : 기타로 지정할 level 이름 지정
+
+        </div>
+
+    -   step_interact() - 상호작용 항 추가
+
+    ```{r}
+    iris_int <- 
+      iris_rec %>%
+      step_interact( ~ Sepal.Width:Sepal.Length) %>%
+      prep(training = iris)
+    summary(iris_int)
+    ```
+
+    </div>
+
+```{r}
+table(ames_train$Bldg_Type)
+simple_ames <- 
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type,
+         data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>% 
+  step_dummy(all_nominal())
+simple_ames
+```
+
+### Prep
+
+recipe object를 설정한 후에 prep을 이용해서 계산을 한다.
+
+```{r}
+simple_ames <- prep(simple_ames, training = ames_train)
+simple_ames
+```
+
+### Bake
+
+recipe, prep을 거쳐서 전처리된 데이터를 이용해서 적용을 해보는 단계이다.
+
+데이터 전처리를 완료한 결과를 보고 싶으면 bake 함수를 이용하면 되는데 training data를 기준으로 이전에 데이터 전처리를 했기 때문에 **new_data = training set을** 넣고 중복 계산할 필요가 없다.
+
+```{r}
+bake(simple_ames, new_data = NULL)
+```
+
+test 데이터를 기준으로 전처리를 진행할 때 **new_data = test set**을 넣어주기만 하면 recipe, prep을 재지정해줄 필요 없이 곧바로 데이터 전처리가 가능하다.
+
+```{r}
+test_ex <- bake(simple_ames, new_data = ames_test)
+names(test_ex) %>% head()
+test_ex
+
+```
+
+## 참고 문헌
+
+[tidymodel with R bookdown](https://www.tmwr.org/ames.html)
+
+[tidymodel recipe object](https://recipes.tidymodels.org/reference/index.html)
+
+[How are categorical predictors handled in recipes?](%5Btidymodel%20recipe%20object%5D(https://recipes.tidymodels.org/reference/index.html))
