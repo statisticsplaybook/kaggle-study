@@ -179,7 +179,7 @@ rf_best_fit
 
 ## submit prediction
 ```{r}
-subfile <- read_csv(here("walmart/sampleSubmission.csv.zip"))
+subfile <- read_csv(here("data/walmart/sampleSubmission.csv.zip"))
 
 
 subfile$Weekly_Sales <- rf_best_fit %>% 
@@ -347,6 +347,9 @@ walmart_lmfit <- walmart_wflow2 %>%
     fit(train_data)
 ```
 
+```{r}
+juice(walmart_recipe2)
+```
 
 
 ```{r}
