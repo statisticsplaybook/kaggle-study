@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>KaggleR Study 3</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Issac Lee" />
+    <meta name="date" content="2021-03-12" />
+    <script src="libs/header-attrs/header-attrs.js"></script>
+    <link rel="stylesheet" href="xaringan-themer.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# KaggleR Study 3
+## Decision tree
+### Issac Lee
+### 2021-03-12
+
+---
+
+
+
+
+
+
+# Introduction to CART
+
+* One of the oldest and simplest ML algorithms.
+
+* Idea: split the feature space into **exhaustive and mutually exclusive** segments under some rules.
+
+---
+# Advantage vs. Disadvantage
+
+.pull-left[
+
+Advantage
+
+* Easy to explain to people.
+
+* People believe that DT mirror human decision making than regression.
+
+* Easy to handle categorical data without doing dummy coding.
+
+* Insensitive to monotone transformation of inputs
+
+* Robust to outliers
+
+]
+.pull-right[
+
+Disadvantage
+
+* Level of predictive accuracy is lower than other models
+
+* Trees can be very non-robust. Small changes in the data can cause a large change in the final output.
+
+
+by `ISLR`
+
+]
+
+
+---
+# Simple tree solution
+
+.pull-left[
+
+Can we divide these points into two groups by lines?
+
+]
+.pull-right[
+![](DT_files/figure-html/unnamed-chunk-1-1.png)&lt;!-- --&gt;
+
+]
+
+---
+# Simple tree solution
+
+.pull-left[
+
+Can we divide these points into two groups by lines? `Yes`
+
+The following two lines
+
+* `\(x = 0.5\)`
+* `\(y = 0.5\)`
+
+]
+.pull-right[
+![](DT_files/figure-html/unnamed-chunk-2-1.png)&lt;!-- --&gt;
+
+]
+
+---
+# Simple tree regression
+
+.pull-left[
+
+Can we predict this function by calculating mean of some sections?
+
+]
+.pull-right[
+![](DT_files/figure-html/unnamed-chunk-3-1.png)&lt;!-- --&gt;
+
+]
+
+---
+# Simple tree regression
+
+.pull-left[
+
+Can we predict this function by calculating mean of some sections? 
+
+How about these four sections?
+
+* `\(R_1: \{x| 0&lt; x &lt;   25\}\)`
+* `\(R_2: \{x| 25 &lt; x &lt; 50\}\)`
+* `\(R_3: \{x| 50 &lt; x &lt; 75\}\)`
+* `\(R_4: \{x| 75 &lt; x &lt; 100\}\)`
+
+]
+.pull-right[
+
+![](DT_files/figure-html/unnamed-chunk-4-1.png)&lt;!-- --&gt;
+
+]
+
+---
+# Prediction via stratification of the feature space
+
+* Divide the predictior spaces into `\(J\)` distinct and non-overlapping regions, `\(R_1, ..., R_J\)` 
+
+* Goal: find `\(R_1, ..., R_J\)` that minimize the RSS
+
+`$$\sum_{j=1}^{J}\sum_{i\in R_{j}}\left(y_{i}-\hat{y}_{R_{j}}\right)^{2}$$`
+---
+# Let's be `greedy`!
+
+There are infinite number of splitting partitions.
+
+* top-down, greedy approach; a.k.a. recursive binary splitting.
+
+* For the predictor `\(X_j\)`, define
+
+  * `\(R_1(j, s) = \{X|X_j \leq s\}\)` and `\(R_2(j, s) = \{X|X_j &gt; s\}\)`
+
+* For `\(j\)` and `\(s\)`, find the value of `\(j\)` and `\(s\)`
+
+`$$\sum_{i:x_{i}\in R_{1}\left(j,s\right)}\left(y_{i}-\hat{y}_{R_{1}}\right)^{2}+\sum_{i:x_{i}\in R_{2}\left(j,s\right)}\left(y_{i}-\hat{y}_{R_{2}}\right)^{2}$$`
+
+
+---
+class: middle, center
+
+# Overfitting Problem
+
+&lt;img src="./overfit.png" width="30%" style="display: block; margin: auto;" /&gt;
+
+
+---
+# When there is noise..
+
+
+.pull-left[
+
+We have our data model
+
+`$$y_i = x_i^2 + e_i$$`
+
+where `\(e_i \sim \mathcal{N}(0, 10^2)\)`
+
+
+Do we want this?
+
+* No. These lines are too much fitted to the points.
+
+* This model is `overfitted` to the data.
+
+]
+.pull-right[
+
+![](DT_files/figure-html/unnamed-chunk-5-1.png)&lt;!-- --&gt;
+
+]
+
+---
+# We need something like this.
+
+.pull-left[
+
+It captures the general data trend. 
+
+* Simpler than before.
+
+* It can also be used for the `future data`.
+
+
+]
+.pull-right[
+
+![](DT_files/figure-html/unnamed-chunk-6-1.png)&lt;!-- --&gt;
+
+]
+
+---
+class: middle, center
+
+# How to avoid overfitting?
+
+## `Prunning`
+
+&lt;img src="./cut.svg" width="15%" style="display: block; margin: auto;" /&gt;
+
+
+.footnote[
+&lt;div&gt;Icons made by &lt;a href="https://www.freepik.com" title="Freepik"&gt;Freepik&lt;/a&gt; from &lt;a href="https://www.flaticon.com/" title="Flaticon"&gt;www.flaticon.com&lt;/a&gt;&lt;/div&gt;
+]
+
+---
+# Build a tree with threshold
+
+1. Build tree until the decrease in the RSS due to each split exceeds some threshold
+
+  * will result smaller trees
+
+  * short sighted trees..
+
+2. Grow a very large tree `\(T\)` first and cut (`prune`) the branches to make a subtree `\(T_0\)`
+
+  * how to `prune` tho?
+
+---
+# Cost complexity pruning
+
+For each value of `\(\alpha\)`, a tunning parameter, there is a subtree which minimizes
+  
+`$$\sum_{m=1}^{\left|T\right|}\sum_{i:x_{i}\in R_{m}}\left(y_{i}-\hat{y}_{R_{m}}\right)^{2}+\alpha\left|T\right|$$`  
+
+as small as possible. 
+
+* `\(|T|\)`: number of the terminal nodes of the tree `\(T\)`
+
+* `\(R_m\)`: rectangle corresponding to the `\(m\)`th terminal node
+
+* `\(\hat{y}_{R_m}\)` predicted response associated with `\(R_m\)`
+
+* `\(alpha\)` can be found using CV.
+
+---
+# Classification Trees
+
+Classification tree predict a qualitative response.
+
+* predict the most commonly occurring class
+
+* Given region, 
+
+  * Male : 50
+  
+  * Female : 100
+  
+  * Predict the label for the given region as `Female`
+
+---
+# How to build?
+
+* We don't have the concept of `\(RSS\)`
+
+* Natural alternative to `\(RSS\)` is the `classification error rate`
+
+`$$\frac{\text{# of sample} \notin \text{the class label}}{\text{# of toal samples in the given } R}$$`
+more mathematically,
+
+`$$E=1-\underset{k}{max}(\hat{p}_{mk})$$`
+
+But, this is not sufficiently sensitive for tree-growing.
+
+---
+# Gini impurity
+
+Measure of `total variance` across the `\(K\)` classes.
+
+.pull-left[
+
+`$$\begin{align*}
+G &amp; =\sum_{k=1}^{K}\hat{p}_{k}\left(1-\hat{p}_{k}\right)\\
+ &amp; =1-\sum_{k=1}^{K}p_{k}^{2}
+\end{align*}$$`
+
+* Plot shows the Gini w.r.t. `p` when `\(K=2\)`.
+
+* We can easily see that G takes on a small value if all `\(p_k\)` are close to 0 or 1.
+
+]
+.pull-right[
+
+&lt;img src="DT_files/figure-html/unnamed-chunk-7-1.png" width="80%" /&gt;
+
+]
+
+---
+# Example
+
+* Gini impurity for these?
+
+`$$G	=1-\sum_{k=1}^{K}p_{k}^{2}$$`
+
+  * 1, 1, 1, 0, 0, 0
+  
+  * 1, 1, 1, 1, 1, 1
+  
+  * 1, 1, 1, 1, 0, 0
+
+---
+# Gini index
+
+Given `\(R(j, s)\)`, the Gini index is the weighted sum of gini impurity of the resulting subsets; Which one is better split?
+
+&lt;img src="./gini_index.png" width="100%" style="display: block; margin: auto;" /&gt;
+
+---
+# Entropy
+
+Measure of `impurity` of each node in a DT.
+
+.pull-left[
+
+`$$E=-\sum_{k=1}^{K}\hat{p}_{k}log\hat{p}_{k}$$`
+
+* Plot shows the entropy w.r.t. `p` when `\(K=2\)`.
+
+]
+.pull-right[
+
+&lt;img src="DT_files/figure-html/unnamed-chunk-8-1.png" width="80%" /&gt;
+
+]
+
+---
+# Example
+
+* Entropy for these?
+
+`$$E=-\sum_{k=1}^{K}\hat{p}_{k}log\hat{p}_{k}$$`
+  * 1, 1, 1, 0, 0, 0
+  
+  * 1, 1, 1, 1, 1, 1
+  
+  * 1, 1, 1, 1, 0, 0
+
+
+---
+# Information Gain
+
+Given `\(R(j, s)\)`, the information gain:
+
+Entropy for parent node - the weighted average of entropy of the resulting subsets; Which one is better split?
+
+&lt;img src="./gini_index.png" width="100%" style="display: block; margin: auto;" /&gt;
+
+---
+# Build a tree in classification
+
+Find `\(R(j, s)\)` which 
+
+* `Minimizes` Gini Index or
+
+* `Maximizes` Information Gain 
+
+Repeat this process until
+
+* `max depth` reaches or leaf has `100% purity`.
+
+
+---
+
+
+```r
+library(tree)
+library(ISLR)
+library(magrittr)
+library(rpart)
+library(rpart.plot)
+
+high &lt;- ifelse(Sales &lt;=8, "NO", "YES")
+my_data &lt;- data.frame(Carseats, high)
+result &lt;- tree(high~.-Sales, my_data)
+summary(result)
+mydata &lt;- Carseats %&gt;% janitor::clean_names() 
+
+mydata %&lt;&gt;% 
+  mutate(high = ifelse(sales &lt;= 8, "No", "Yes")) %&gt;% 
+  select(-sales)
+tree_carseats &lt;- tree(high ~ ., data = mydata)
+
+summary(tree_carseats)
+```
+
+
+---
+class: middle, center, inverse
+
+# Thanks!
+
+
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false,
+"ratio": "16:9"
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

@@ -103,9 +103,9 @@ class: center, middle
 .pull-left[
 
 * 3월 6일: 성균님(tidymodel walmart), 코니님 (walmart EDA)
-* 3월 13일:
-* 3월 20일: 상훈님
-* 3월 27일: Dondon 
+* 3월 13일: 민희님, 이삭
+* 3월 20일: 상훈님,
+* 3월 27일: Dondon, 
 
 ]
 .pull-right[
