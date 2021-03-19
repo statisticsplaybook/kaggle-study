@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Imputations to Predict Weekly Sales Using Walmart Data</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Sanghoon Park" />
+    <meta name="date" content="2021-03-18" />
+    <script src="libs/header-attrs-2.7/header-attrs.js"></script>
+    <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
+    <link href="libs/tile-view-0.2.4/tile-view.css" rel="stylesheet" />
+    <script src="libs/tile-view-0.2.4/tile-view.js"></script>
+    <link rel="stylesheet" href="css/ath-slides.css" type="text/css" />
+    <link rel="stylesheet" href="css/ath-inferno-fonts.css" type="text/css" />
+    <link rel="stylesheet" href="css/animate.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+
+
+
+
+
+
+
+class: center middle main-title section-title-4
+
+# Imputations for Walmart Data
+
+.class-info[
+
+**Sanghoon Park**
+
+.light[
+March 19th Kaggle Study Presentation
+
+]
+
+.light[
+github.com/statisticsplaybook/kaggle-study
+]
+
+]
+
+---
+
+class: middle
+
+.box-4.huge[Missing data]
+
+.box-inv-4[Values that are not available &lt;br&gt; that would be meaningful if not observed.]
+
+---
+
+layout: true
+class: title title-4
+
+---
+
+# Type of Missing Data
+
+--
+
+.center.float-left[.box-inv-4[Missing Completely at Random (MCAR)]]
+
+--
+
+.center.float-left[.box-inv-4[Missing at Random (MAR)]]
+
+--
+
+.center.float-left[.box-inv-4[Missing Not at Random (MNAR)]]
+
+--
+
+.box-inv-4[**Expectation**]
+
+--
+
+.box-5.sp-after[Missing Data를 "적절하게" 채워넣으면, &lt;br&gt; 더 좋은 추정치를 얻을 수 있을 것.]
+
+--
+
+.box-inv-4.medium[**But How?**]
+
+---
+
+# Missing Completely at Random (MCAR)
+
+.box-inv-4.medium[Missing **not related to** X or Y]
+
+--
+
+.box-inv-4.small[Missingness unrelated to values of variables,&lt;br&gt;
+either missing or observed]
+
+.box-inv-4.small[If completely random, results unbiased]
+
+.box-4[However, missing data rarely MCAR]
+
+---
+
+# Missing Completely at Random (MCAR)
+
+.box-inv-4.medium[Missing **not related to** Y, &lt;br&gt; but **may be related to** X]
+
+--
+
+.box-inv-4.small[Missingness unrelated to values of variables,&lt;br&gt;
+either missing or observed]
+
+.box-inv-4.small[Cause of missing data unrelated to missing values]
+
+.box-4[But may be related to observed values of other variables]
+
+---
+
+# Missing Not at Random (MNAR)
+
+.box-inv-4.medium[Missing **related to** Y]
+
+--
+
+.box-inv-4.small[Relationship between missingness and values]
+
+.box-inv-4.small[Also, missingness due to unobserved predictors]
+
+.box-4[if non-random, must be modeled or &lt;br&gt; else risks bias
+(**non-ignorable**)]
+
+---
+
+# Approaches
+
+.pull-left[
+.box-4[Single-imputation methods]
+
+.box-inv-4.small[Substitution]
+
+.box-inv-4.small[Carrying-forward]
+
+.box-inv-4.small[Interpolation]
+
+]
+
+.pull-right[
+
+.box-4[Multiple-imputation methods]
+
+&lt;figure&gt;
+  &lt;img src="img/fig1.jpg" alt="Main steps used in multiple imputation" title="Main steps used in multiple imputation" width="100%"&gt;
+&lt;/figure&gt;
+
+]
+
+---
+
+# Single Imputation Methods
+.box-4[Goal:]
+
+.box-inv-4.small[Produce complete dataset by filling in missing values]
+
+--
+
+.pull-left[
+
+.box-4[Substitution]
+
+.box-inv-4.small[e.g. mean, median, mode substitution]
+
+.box-inv-4.small[But mean substitute based on assumption of normal distribution]
+
+]
+
+--
+
+.pull-right[
+
+.box-4[Linear interpolation]
+
+.box-inv-4.small[Use function to extrapolate missings]
+
+.box-inv-4.small[Follows expected trends]
+]
+
+---
+
+# Model Based Methods
+
+--
+
+.center.float-left[.box-inv-4[Regression] .box-inv-4[Multiple imputation] .box-inv-4[k-nearest neighbors]]
+
+--
+
+.pull-left[
+
+.box-4[Regression]
+
+.box-inv-4.small[Uses results from regression to fill in missing values]
+
+.box-4[K-Nearest Neighbors]
+
+.box-inv-4.small[Mean of the `\(k\)` values coming from the `\(k\)` most similar
+complete observations]
+]
+
+--
+
+.pull-right[
+
+.box-4[Multiple imputation]
+
+.box-inv-4.small[Uses the distribution of the observed data to estimate
+plausible values]
+
+
+.box-inv-4.small[Random components incorporated to reflect uncertainty]
+
+.box-inv-4.small[Individually analyze multiple datasets &amp;rarr; Estimates combined]
+
+]
+
+---
+
+# Score Comparisons
+
+.box-inv-4.small[`Park-benchmark-comparison-mar-19.R`]
+
+Building benchmark model:
+
+
+```r
+# Load packages
+library(tidyverse)
+library(tidymodels)
+library(magrittr)
+library(knitr)
+```
+
+---
+
+# Score Comparisons
+
+Import dataset as `train` and `test`
+
+
+```r
+train &lt;- read_csv(
+  here("data/walmart/train.csv.zip"))
+test &lt;- read_csv(
+  here("data/walmart/test.csv.zip"))
+```
+
+Combine two datasets
+
+
+```r
+all_data &lt;- bind_rows(train, test) %&gt;%
+    janitor::clean_names()
+```
+
+---
+
+# Benchmark model: lm with store
+
+전처리를 위한 `recipe` 설정과 `\(X\)` 추출
+
+
+```r
+bench_recipe &lt;- all_data %&gt;% 
+    recipe(weekly_sales ~ store) %&gt;% 
+    step_mutate(
+        store = as.factor(store)) %&gt;%
+    prep()
+# Produce X manipulated by recipe
+benchmark &lt;- juice(bench_recipe) 
+```
+
+---
+
+# Fitting the model
+
+.pull-left[
+`Train`과 `Test` 분리
+
+
+```r
+index &lt;- 
+  seq_len(nrow(train))
+train_bench &lt;- 
+  benchmark[index,]
+test_bench &lt;- 
+  benchmark[-index,]
+```
+]
+
+.pull-right[
+`lm` 엔진을 이용하여 fit.
+
+
+```r
+lm_benchmark_fit &lt;- 
+    linear_reg() %&gt;% 
+  set_engine("lm") %&gt;%
+    fit(weekly_sales ~ store, 
+        data = train_bench)
+```
+]
+---
+
+# Fitting the model
+
+전처리한 데이터로 `lm` 엔진을 통해 계산한 계수들을 이용
+
+`test` 데이터의 예측변수로 `NA`인 `weekly_sales` 추정
+
+
+```r
+result_bench &lt;- predict(lm_benchmark_fit, 
+                        test_bench)
+```
+
+---
+
+# Submit to the Kaggle
+
+1. `Kaggle`에서 받아온 제출용 공양식을 `R`로 불러온다.
+
+2. 공란인 `test`의 `Weekly_Sales`를 추정한 모델의 `weekly_sales`로 대체한다.
+
+3. 다시 엑셀 파일로 내보내 제출한다.
+
+---
+
+# Submit to the Kaggle
+
+
+```r
+submission_bench &lt;- 
+  read_csv("디렉토리/sampleSubmission.csv")
+submission_bench$Weekly_Sales &lt;- result_bench$.pred
+write.csv(submission_bench, 
+          row.names = F, 
+          "디렉토리/benchmark_model.csv")
+```
+---
+
+# Model fits
+
+
+
+&lt;img src="Park-imputation-mar-19_files/figure-html/unnamed-chunk-10-1.png" width="864" style="display: block; margin: auto;" /&gt;
+
+---
+
+layout: false
+class: middle
+
+.box-4.huge[Let's play with&lt;br&gt;Walmart Data]
+
+
+
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="libs/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false,
+"ratio": "16:9",
+"navigation": {
+"scroll": false
+}
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
