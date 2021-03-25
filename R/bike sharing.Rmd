@@ -1,0 +1,213 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(magrittr)
+library(data.table)
+library(gridExtra)
+
+theme_set(theme_bw())
+```
+
+```{r}
+train <- read_csv("C:/Users/sangdon/Desktop/kaggle-study/data/bike sharing/train.csv")
+test <- read_csv("C:/Users/sangdon/Desktop/kaggle-study/data/bike sharing/test.csv")
+```
+
+```{r}
+head(train)
+names(train)
+names(test)
+```
+
+```{r}
+train %>% 
+    select(-c(casual, registered)) -> train
+```
+
+```{r}
+all_data <- bind_rows(train, test)
+tail(all_data)
+
+glimpse(all_data)
+all_data$holiday %>% unique()
+all_data$workingday %>% unique()
+all_data$weather %>% unique()
+
+all_data$season <- factor(all_data$season, labels = c('spring', 'summer', 'fall', 'winter'))
+all_data$weather <- as.factor(all_data$weather)
+all_data$workingday <- as.factor(all_data$workingday)
+all_data$holiday <- as.factor(all_data$holiday)
+
+all_data %>% mutate(year = year(datetime), 
+                    month = month(datetime), 
+                    day = day(datetime), 
+                    hour = hour(datetime)) %>% 
+    select(-datetime) %>% 
+    select(year, month, day, holiday, workingday, everything()) -> all_data
+
+```
+
+
+```{r}
+skim(all_data)
+
+```
+
+```{r}
+
+all_data %>% 
+    ggplot(aes(x = count)) + 
+    geom_histogram()
+p1 <- all_data %>% 
+    ggplot(aes(x = atemp)) + 
+    geom_histogram()
+p2 <- all_data %>% 
+    ggplot(aes(x = temp)) + 
+    geom_histogram()
+
+grid.arrange(grobs = list(p1, p2), col = 2)
+
+all_data %>% 
+    select(holiday, temp, humidity, windspeed, count) %>% 
+    GGally::ggpairs(mapping = aes(color = holiday))
+
+all_data %>% 
+    select(workingday, temp, humidity, windspeed, count) %>% 
+    GGally::ggpairs(mapping = aes(color = workingday))
+```
+```{r}
+factor_list <- c('holiday', 'workingday', 'season', 'weather')
+
+
+all_data %>% 
+    group_by(season, hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count, color = season)) +
+    geom_line()
+
+factor_list <- sapply(all_data, is.factor) %>%
+  which()
+
+lst <- lapply(factor_list, function(i) {
+  df_list <- colnames(all_data)[i]
+
+  all_data %>%
+    rename(aa = df_list) %>%
+    group_by(aa, hour) %>%
+    summarise(count = sum(count, na.rm = T)) %>%
+    ggplot(aes(x = hour, y = count, group = aa, colour = aa)) +
+    labs(title = paste0("Count by ",df_list), x = "Hour",  color = df_list) +
+    theme_bw() +
+    geom_line(size = 1.5, alpha = 0.7)
+})
+
+grid.arrange(grobs=lst, ncol=2)
+
+
+```
+
+```{r}
+bike_res <- all_data %>% 
+    recipe(count~.) %>% 
+    # step_downsample()
+    step_dummy(all_nominal()) %>% 
+    step_nzv(all_numeric()) %>% 
+    step_YeoJohnson(all_numeric()) %>%
+    step_normalize(all_predictors()) %>% 
+    prep(training = all_data)
+    
+```
+
+```{r}
+all_data2 <- juice(bike_res)
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+
+
+```
+
+```{r}
+set.seed(1234)
+validation_split <- validation_split(train2,  prop = 0.7) # strata 지정 이유. holiday 사라짐 
+
+```
+
+
+```{r}
+xgb_spec <- boost_tree(
+    trees = 1000, 
+    tree_depth = tune(),
+    min_n = tune(), 
+    loss_reduction = tune(), 
+    sample_size = tune(),
+    mtry = tune(), 
+    learn_rate = tune()
+) %>% 
+    set_engine('xgboost') %>% 
+    set_mode('regression')
+```
+
+```{r}
+xgb_grid <- grid_latin_hypercube(
+    tree_depth(), 
+    min_n(), 
+    loss_reduction(), 
+    sample_size = sample_prop(), 
+    finalize(mtry(), train2), 
+    learn_rate(), 
+    size = 30
+)
+xgb_grid
+```
+```{r}
+xgb_wf <- workflow() %>% 
+    add_formula(count~.) %>% 
+    add_model(xgb_spec)
+
+```
+
+```{r}
+set.seed(1234)
+vb_folds <- vfold_cv(train2, strata = count)
+vb_folds
+```
+```{r}
+doParallel::registerDoParallel()
+set.seed(1234)
+
+xgb_res <- tune_grid(
+    xgb_wf, 
+    resamples = vb_folds,
+    grid = xgb_grid, 
+    control = control_grid(save_pred = TRUE)
+)
+
+show_best(xgb_res, 'rmse')
+best_param <- select_best(xgb_res, 'rmse')
+
+final_xgb <- finalize_workflow(xgb_wf, best_param)
+final_xgb
+
+```
+
+
+```{r}
+library(vip)
+final_xgb %>% 
+    fit(data = train2) %>% 
+    pull_workflow_fit() %>% 
+    vip(geom = 'point')
+
+```
+
+```{r}
+final_res <- last_fit(final_xgb, test2)
+```
