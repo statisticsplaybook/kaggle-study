@@ -5,6 +5,7 @@ library(skimr)
 library(magrittr)
 library(probably)
 library(gt)
+library(parallel)
 
 # Store - the store number
 # Dept - the department number
@@ -55,7 +56,7 @@ train <- train %>% select(-starts_with('mark'))
 test <- test %>% select(-starts_with('mark'))
 
 
-names(train)
+
 
 
 # preprocessing 
@@ -63,15 +64,20 @@ names(train)
 walmart_recipe <- 
     recipe(weekly_sales ~ .,
            data = train) %>%
-    step_date(date, features = c('month', 'year')) %>% 
+    step_date(date, features = c('month')) %>% 
     step_rm(date) %>%
     step_mutate(store = as.factor(store), 
-                dept = as.factor(dept)) %>%
-    step_dummy(all_nominal()) %>% 
+                dept = as.factor(dept), 
+                type = as.factor(type), 
+                is_holiday = as.factor(is_holiday)) %>%
     step_zv(all_predictors()) %>% 
-    step_nzv(all_predictors()) %>% 
-    step_normalize(all_numeric(), -all_outcomes()) %>% 
+    step_nzv(all_predictors()) %>%
+    step_other(store, dept, threshold = 0.1) %>%
+    step_dummy(all_predictors(), -all_numeric(), -all_outcomes()) %>% 
     prep()
+
+walmart_recipe %>% juice() %>% dim()
+walmart_recipe %>% juice() %>% glimpse()
 
 
 baked_train <- walmart_recipe %>% 
@@ -80,70 +86,6 @@ baked_train <- walmart_recipe %>%
 baked_test <- walmart_recipe %>% 
     bake(test)
 
-
-set.seed(1234)
-
-cv_data <- vfold_cv(baked_train, v = 5, strata = weekly_sales)
-
-
-
-# random forest 
-
-tune_spec <- rand_forest(
-    mtry = tune(),
-    trees = 1000,
-    min_n = tune()
-) %>%
-    set_mode("regression") %>%
-    set_engine("ranger")
-
-
-params <- parameters(tune_spec) %>%
-    finalize(baked_train)
-
-rf_wflow <- workflow() %>%
-    add_recipe(walmart_recipe) %>%
-    add_model(tune_spec)
-
-
-options(tidymodels.dark = TRUE)
-cl <- makePSOCKcluster(6)
-registerDoParallel(cl)
-
-
-folds <- vfold_cv(baked_train, v = 5)
-
-tuned <- tune_bayes(
-    object = rf_wflow,
-    resamples = folds,
-    param_info = params,
-    iter = 30,
-    metrics =  metric_set(rmse, mape),
-    initial = 10,
-    control = control_bayes(
-        verbose = TRUE,
-        no_improve = 10,
-        seed = 123
-    )
-)
-
-show_best(tuned, 'rmse') %>% 
-    select(1:7, 11) %>% 
-    gt()
-
-
-best_model <- select_best(tuned, "rmse")
-
-final_model <- finalize_model(mod, best_model)
-walmart_workflow <- xgboost_wflow %>% update_model(final_model)
-xgb_fit <- fit(walmart_workflow, data = train)
-
-
-pred <- 
-    predict(xgb_fit, test) %>% 
-    mutate(modelo = "XGBoost")
-
-pred
 
 
 
@@ -251,12 +193,11 @@ xgboost_wflow <- workflow() %>%
     add_recipe(walmart_recipe) %>%
     add_model(mod)
 
-
+library(parallel)
 options(tidymodels.dark = TRUE)
 cl <- makePSOCKcluster(6)
-registerDoParallel(cl)
-
-folds <- vfold_cv(train, v = 5)
+set.seed(1234)
+folds <- vfold_cv(train, v = 5, strata = is_holiday)
 
 tuned <- tune_bayes(
     object = xgboost_wflow,
@@ -300,7 +241,7 @@ subfile
 subfile$Weekly_Sales <- pred$.pred
 
 write.csv(subfile, row.names = FALSE,
-          "./data/walmart/xgboost_bayes_result.csv")
+          "./data/walmart/xgboost_bayes_result2.csv")
 
 
 
