@@ -1,0 +1,142 @@
+---
+title: "Walmart baseline"
+author: "Issac Lee"
+date: "2/28/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+-   kernel url: <https://www.kaggle.com/issactoast/walmart-baseline-with-tidymodels>
+
+## 목표
+
+Walmart 매출 예측 대회의 베이스라인 모델을 `tidymodels`를 사용하여 잡아본다.
+
+## 라이브러리 로딩
+
+예측에 사용될 패키지를 로딩하고, `read_csv()`를 이용해서 `train`과 `test` 셋을 불러온다. 기본 모델(baseline model)이기 때문에 추가적인 정보가 포함되어 있는 다른 파일들은 나중에 불러오도록 한다.
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(lubridate)
+library(skimr)
+library(magrittr)
+
+train_path <- file.path(here::here(),"data/walmart/train.csv.zip")
+test_path <- file.path(here::here(),"data/walmart/test.csv.zip")
+train <- read_csv(train_path)
+test <- read_csv(test_path)
+```
+
+## 각 데이터 셋 정보확인
+
+각 `train`과 `test` 셋의 크기와 변수 이름을 확인하자. `test` 셋에는 우리가 예측하고자 하는 변수인 `Weekly_Sales`가 포함되어 있지 않음을 알 수 있다.
+
+```{r}
+# size of data
+dim(train)
+dim(test)
+
+# train
+names(train)
+train %>% head()
+
+# test
+names(test)
+test %>% head()
+```
+
+## 전처리를 위한 alldata 생성
+
+전처리 과정을 거칠 때 `train`과 `test`셋을 합쳐놓으면 편한점이 많으므로, `all_data`로 합쳐놓기로 하자.
+
+```{r}
+# alldata combine
+all_data <- bind_rows(train, test)
+all_data <- all_data %>% janitor::clean_names()
+names(all_data)
+
+all_data %>% head()
+all_data %>% skim()
+```
+
+`Date` 타입인 `date`변수에서 년도 정보와 월 정보를 빼낸 후, `date` 변수를 제외시킴.
+
+```{r}
+all_data %>% 
+    mutate(year = year(date),
+           month = month(date)) %>% 
+    select(-c(date)) -> all_data2
+
+all_data2 %>% head()
+```
+
+## tidymodels - recipe을 이용한 전처리
+
+가장 간단한 전처리를 한다. 숫자 변수 (numeric)들을 normalize 시키는 `step_normalize()`를 이용해서 평균과 분산을 계산, 스케일링을 시행함.
+
+```{r}
+walmart_recipe <- 
+    recipe(weekly_sales ~ .,
+           data = all_data2) %>% 
+    step_normalize(all_numeric(), -all_outcomes())
+walmart_recipe
+
+walmart_recipe <- prep(walmart_recipe, training = all_data2)
+walmart_recipe
+
+all_data2 <- bake(walmart_recipe, 
+                  new_data = all_data2)
+
+names(all_data2)
+head(all_data2)
+```
+
+## 테스트, 트레인 셋 분리
+
+전처리가 끝난 `all_data2`에서 `train`셋과 `test`셋을 분리함.
+
+```{r}
+# train, test
+
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+
+train2 %>% dim()
+```
+
+## 모델 설정 및 학습
+
+기본 패키지에 있는 `lm()`함수를 사용하여 선형 회귀를 사용하기 위하여, `set_engine()` 함수의 값을 "lm"으로 설정함. `fit()`를 사용해서 학습한다.
+
+```{r}
+lm_model <- 
+    linear_reg() %>% 
+    set_engine("lm")
+
+lm_form_fit <- 
+    lm_model %>% 
+    fit(weekly_sales ~ ., data = train2)
+
+lm_form_fit
+```
+
+## 예측 및 제출
+
+`lm_form_fit`에 들어있는 정보를 사용하여 test셋에 대응하는 `weekly_sales`를 예측한다. 예측한 결과를 대회에서 제공하는 submission 파일에 넣어서 대회 홈페이지에 제출하면 끝!
+
+```{r}
+result <- predict(lm_form_fit, new_data = test2)
+
+subfile <- read_csv(file.path(here::here(),
+                    "/data/walmart/sampleSubmission.csv.zip"))
+subfile$Weekly_Sales <- result$.pred
+
+write.csv(subfile, row.names = FALSE,
+          file.path(here::here(),"/data/walmart/baseline-lm-02262021.csv"))
+```
