@@ -38,7 +38,7 @@ theme_set(theme_bw())
 ## Data load
 
 ```{r}
-file_path <- "./input/bike-sharing-demand/"
+file_path <- "C:/Users/uos/Desktop/kaggle-study/input/bike-sharing-demand/"
 files <- list.files(file_path)
 files
 ```
@@ -60,22 +60,21 @@ skim(train)
 ```{r}
 head(test)
 skim(test)
+
+test %>% 
+  summarise(across(.fns = ~sum(is.na(.))/length(.)))
+
 ```
 
 
 # 데이터 전처리 {.tabset .tabset-fade}
 
-## 변수 제거 
-```{r}
-train %>% 
-    select(-c(casual, registered)) -> train
-```
-
-train data에는 casual, registered 변수가 존재하지만 test 데이터에는 존재하지 않음. 따라서 두 변수를 제외함. train data를 이용해서 test 데이터에 존재하지 않는 변수를 채우는 방법도 고려해볼 필요가 있음. 
-
 ## train, test 데이터 통합 
 ```{r}
 all_data <- bind_rows(train, test)
+all_data %>% 
+  summarise(across(.fns = ~sum(is.na(.))/length(.)))
+
 ```
 
 ## 변수 속성 변경
@@ -129,6 +128,27 @@ grid.arrange(grobs = list(p1, p2), col = 2)
 temp, atemp 분포는 거의 비슷함 
 
 
+
+## casual, registered 분포 
+```{r}
+all_data %>% 
+  ggplot(aes(x = registered)) + 
+  geom_histogram()
+
+all_data %>% 
+  ggplot(aes(x = casual)) + 
+  geom_histogram()
+
+
+var(all_data$registered, na.rm = T)
+mean(all_data$registered, na.rm = T)
+
+var(all_data$casual, na.rm = T)
+mean(all_data$casual, na.rm = T)
+
+```
+train data에는 존재하지만 test 데이터에는 존재하지 않는 count variable이다. 두 변수의 분포를 보면 0의 비율이 매우 많고, 과대산포되어있는 것을 볼 수 있다. 
+
 ## 변수별 상관관계 및 분포 시각화(holiday) 
 ```{r}
 all_data %>% 
@@ -142,6 +162,7 @@ all_data %>%
     select(workingday, temp, humidity, windspeed, count) %>% 
     GGally::ggpairs(mapping = aes(color = workingday))
 ```
+
 
 # factor 변수 시각화 {.tabset .tabset-fade}
 
@@ -199,19 +220,70 @@ all_data %>%
     geom_line(size = 1.5, alpha = 0.7)
 ```
 
+# 결측치 처리 {.tabset .tabset-fade}
+
+```{r}
+sum(is.na(all_data))
+
+all_data %>% 
+  summarise(across(.fns = ~sum(is.na(.))/length(.)))
+
+library(pscl)
+
+# registered 
+
+imp_train <- all_data %>% 
+  select(registered, season, workingday, weather, atemp, humidity, windspeed) %>% 
+  filter(!is.na(registered))
+
+imp_test <- all_data %>% 
+  select(registered, season, workingday, weather, atemp, humidity, windspeed) %>% 
+  filter(is.na(registered))
+
+zeroNB_fit <- zeroinfl(registered~ season + workingday + weather + atemp + humidity + windspeed,
+                    data = imp_train, dist = 'negbin')
+
+zeroNB_pred <- predict(zeroNB_fit, imp_test)
+all_data$registered[is.na(all_data$registered)] <- zeroNB_pred
+
+# casual 
+
+imp_train_c <- all_data %>% 
+  select(casual, season, workingday, weather, atemp, humidity, windspeed) %>% 
+  filter(!is.na(casual))
+
+imp_test_c <- all_data %>% 
+  select(casual, season, workingday, weather, atemp, humidity, windspeed) %>% 
+  filter(is.na(casual))
+
+zeroNB_fit_c <- zeroinfl(casual~ season + workingday + weather + atemp + humidity + windspeed,
+                    data = imp_train_c, dist = 'negbin')
+
+zeroNB_pred_c <- predict(zeroNB_fit_c, imp_test_c)
+
+all_data$casual[is.na(all_data$casual)] <- zeroNB_pred_c
+
+
+all_data
+
+sum(is.na(all_data)) # count NA 
+```
+
+
 
 
 # Recipe + preperation {.tabset .tabset-fade}
 
 ```{r}
+library(themis)
+
 bike_res <- all_data %>% 
     recipe(count~.) %>% 
-    step_rm(datetime, year) %>% 
+    step_rm(datetime, year) %>% # holiday 빼면 점수 안좋아짐..  
     # step_downsample() : category 변수의 level에서 빈도가 가장 낮은 level로 변환 
     # step_boxCox(all_numeric()) : boxcox transformation : 분포의 정규성 맞춰줌  
-    # step_smote() : category level 빈도가 불균형일 때 
     step_log(count, offset = 1) %>% 
-    step_dummy(all_nominal()) %>% 
+    step_dummy(all_nominal()) %>%
     step_nzv(all_numeric()) %>% 
     #step_YeoJohnson(all_numeric(), -all_outcomes()) %>% : boxcox와 비슷 
     #step_normalize(all_numeric(), -all_outcomes()) %>% 
@@ -273,13 +345,15 @@ xgb_wf <- workflow() %>%
     add_formula(count~.) %>% 
     add_model(xgb_spec)
 
+
+
 ```
 
 
 ## 교차검증 데이터 세팅(cross validation) 
 ```{r}
 set.seed(1234)
-vb_folds <- vfold_cv(train2, v = 5, strata = count)
+vb_folds <- vfold_cv(train2, v = 10, strata = count)
 vb_folds
 ```
 
@@ -326,15 +400,6 @@ xgb_fit <- fit(final_workflow, data = train2)
 
 # 모델 학습 결과 {.tabset .tabset-fade}
 
-## 변수 중요도 그림(feature importance plot)
-```{r}
-library(vip) # feature importance plot 그리기 
-final_xgb %>% 
-    fit(data = train2) %>%  # iter, training_rmse 
-    pull_workflow_fit() %>% #  http://www.rebeccabarter.com/blog/2020-03-25_machine_learning/
-    vip(geom = 'point')
-```
-
 ## 모델 예측값 산출 
 ```{r}
 pred_xgb <- 
@@ -355,11 +420,11 @@ final_xgb %>%
 
 # 파일 제출 {.tabset .tabset-fade}
 ```{r}
-subfile <- read_csv(file.path(file_path, "sampleSubmission.csv")
-subfile$count <- exp(pred_lasso$.pred) + 1
+subfile <- read_csv(file.path(file_path, "sampleSubmission.csv"))
+subfile$count <- pred_xgb$.pred
 
 write.csv(subfile, row.names = FALSE,
-          file.path(file_path, "xgb_Submission.csv") 
+          file.path(file_path, "xgb_Submission_imp1.csv")) 
 ```
 
 
