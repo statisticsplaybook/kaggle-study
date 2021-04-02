@@ -222,7 +222,7 @@ test2 <- final_data[-train_index,]
 
 train2 %>% dim()
 
-#model building and trainning
+#model building and training
 
 lm_model <- linear_reg() %>%
     set_engine("lm")
