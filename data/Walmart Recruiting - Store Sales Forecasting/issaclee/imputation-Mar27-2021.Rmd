@@ -21,8 +21,7 @@ knitr::opts_chunk$set(echo = TRUE,
                       fig.align = "center")
 ```
 
-
-능선회귀 (Ridge regression) 튜닝에 대하여 알아보자.
+Elestic net 튜닝에 대하여 알아보자.
 
 ![Photo steal from [here](https://connectedremag.com/das-in-building-wireless/walmart-verizon-explore-testing-5g-in-some-stores/)](https://connectedremag.com/wp-content/uploads/2020/03/walmart-5G-connected-real-estate.png)
 
@@ -30,9 +29,9 @@ knitr::opts_chunk$set(echo = TRUE,
 
 # 준비작업 {.tabset .tabset-fade}
 
-## 사용 Library 로드
+## Library load
 
-이번 포스팅에서는 핫하디 핫한 `tidymodels` 사용하여 월마트 대회를 가지고 놀아본다. 또한 마이 뻬이보릿 연산자들을 사용하기 위하여 `magrittr`를 불러왔다.
+이번 포스팅에서 사용할 R패키지들을 불러오자. 특히 요즘 핫하디 핫한 `tidymodels` 사용하여 월마트 대회를 가지고 놀아본다. 또한 마이 빼이보릿 연산자들을 사용하기 위하여 `magrittr`를 불러왔다.🤣
 
 ```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
 library(tidymodels)
@@ -43,13 +42,16 @@ library(knitr)
 theme_set(theme_bw())
 ```
 
-## 데이터 불러오기
+## Dataset load
+
+이 대회에서 주어진 데이터셋을 불러보자. 주어진 파일 리스트는 다음과 같다.
 
 ```{r}
 file_path <- "../input/walmart-recruiting-store-sales-forecasting/"
 files <- list.files(file_path)
 files
 ```
+각 변수의 이름을 `janitor` 패키지로 말끔하게 바꿔준다.
 
 ```{r, message=FALSE}
 train <- read_csv(file.path(file_path, "train.csv.zip")) %>% 
@@ -64,7 +66,7 @@ stores <- read_csv(file.path(file_path, "stores.csv")) %>%
 
 # 데이터 기본정보 확인{.tabset .tabset-fade}
 
-## 기본 데이터
+## Basic info.
 
 이 대회는 기본적으로 간단한 대회이다. 첫번째 스터디용 대회로 선택을 한 이유이기도 하다. 주 데이터는 42만개의 train 샘플과 11만개의 test 샘플로 구성이 되어있다.
 
@@ -80,19 +82,19 @@ names(train)
 names(test)
 ```
 
-## `train` 데이터 훑어보기
+## train data
 
 ```{r}
 skim(train)
 ```
 
-## `test` 데이터 훑어보기
+## test data
 
 ```{r}
 skim(test)
 ```
 
-## `store` 데이터
+## store data
 
 `store` 데이터는 상대적으로 간단하다. 각 점포에 대한 사이즈와 타입변수가 담겨져 있다. 타입변수는 월마트에서 운영하는 supercenter와 같이 매장의 성격을 나타내는 변수이다.
 
@@ -106,7 +108,7 @@ head(stores)
 skim(stores)
 ```
 
-## `feature` 데이터
+## feature data
 
 `feature` 데이터는 조금 복잡한데, 각 점포별로 각 주마다의 정보가 담겨있는 것을 알 수 있다.
 
@@ -155,7 +157,7 @@ train %>%
          x = "weekly_sales")
 ```
 
-## 결측치 분석
+## NA analysis
 
 R에는 결측치 분석을 아주 용이하게 해주는 패키지가 하나 존재하는데, 바로 `naniar`라는 패키지 이다.
 
@@ -181,7 +183,7 @@ tidymodels의 전처리 패키지지 recipe을 사용하여 전처리를 하도�
 
 ## `all_data` 합치기
 
-먼저 `store` 와 `features` 데이터에 있는 정보를 `train`과 `test` 데이터에 옮겨오자. 일단 결측치가 없는 변수들만 가져오고, 추후에 결측치가 있는 변수인 cpi와 unemployment, mark_down 변수들은 제외한다.
+먼저 `store` 와 `features` 데이터에 있는 정보를 `train`과 `test` 데이터에 옮겨오자. 일단 결측치가 없는 변수들만 가져오고, 추후에 결측치가 있는 변수인 cpi와 unemployment, mark_down 변수들을 가져오자.
 
 ```{r}
 # train weekly_sales 변경
@@ -191,7 +193,7 @@ train %<>%
 all_data <- bind_rows(train, test)
 all_data <- left_join(all_data, stores, by = c("store"= "store"))
 all_data <- features %>% 
-    select(-c(starts_with("mark"), is_holiday, cpi, unemployment)) %>% 
+    select(-c(starts_with("mark"), is_holiday)) %>% 
     left_join(all_data, y = ., by = c("store"= "store",
                                       "date" = "date"))
 
@@ -199,15 +201,82 @@ names(all_data)
 dim(all_data)
 ```
 
-테스트 데이터에 들어있는 `weekly_sales` 변수를 제외한 모든 변수에 결측치가 없음을 확인하자.
+## `NA` cpi와 unemployment 변수
+
+`unemployment`과 `cpi`의 `NA` 값들의 경우, 결측치 값이 2013년 5, 6, 7월에 집중 되어 있는 것을 확인 할 수 있다.
+
+```{r}
+all_data %>% 
+    mutate(year = lubridate::year(date)) %>% 
+    mutate(month = lubridate::month(date)) %>% 
+    group_by(year, month) %>% 
+    summarise(count_na_cpi = sum(is.na(cpi)),
+              count_na_unemp = sum(is.na(unemployment))) %>% 
+    filter(count_na_cpi > 0 | count_na_unemp > 0)
+```
+
+## `cpi`와 `unemployment` 변수 `NA` 결측치 채우기
+
+`cpi`와 `unemployment`를 종속변수로 설정 후 년도, 월, 점포, 부서 변수를 이용해서 회귀분석을 이용하여 채우도록 한다.
+
+```{r}
+impute_var <- function(var, all_data, var_name){
+  var_train <- all_data %>% 
+    select({{var}}, date, store, dept) %>% 
+    filter(!is.na({{var}}))
+  var_test <- all_data %>% 
+    select({{var}}, date, store, dept) %>% 
+    filter(is.na({{var}}))
+  
+  var_rec <- recipe(as.formula(paste0(var_name, "~ .")), var_train) %>% 
+      step_mutate(store = as_factor(store),
+                  dept = as_factor(dept),
+                  year = lubridate::year(date),
+                  month = lubridate::month(date)) %>%
+      step_dummy(store, dept) %>% 
+      prep(training = var_train)
+  var_train2 <- juice(var_rec)
+  var_test2 <- bake(var_rec, var_test)
+  
+  lm_model <- 
+      linear_reg() %>%
+      set_engine("lm")
+  
+  lm_fit <- 
+      lm_model %>% 
+      fit(as.formula(paste0(var_name, "~ .")), data = var_train2)
+  
+  var_impute <- predict(lm_fit, var_test2)
+  var_impute$.pred
+}
+result_cpi <- impute_var(cpi, all_data, "cpi")
+result_ump <- impute_var(unemployment, all_data, "unemployment")
+all_data$cpi[is.na(all_data$cpi)] <- result_cpi
+all_data$unemployment[is.na(all_data$unemployment)] <- result_ump
+all_data %>% tail %>% kable()
+```
 
 ```{r}
 all_data %>% 
     summarise_all(~sum(is.na(.)))
 ```
-## 날짜 데이터 베이스 만들기
 
-미국의 휴일 정보를 가지고있는 step_holiday 함수를 이용해서 미국 공휴일을 모두 빼오도록 한다. 다음은 미국 공휴일 목록이다.
+
+```{r}
+# all_data %>% head()
+# info_cpi <- all_data %>% 
+#   group_by(store, dept) %>% 
+#   summarise(mean_cpi = mean(cpi, na.rm = TRUE),
+#             mean_unemp = mean(unemployment, na.rm = TRUE))
+# info_cpi
+# all_data %>% 
+#   filter(is.na(cpi) | is.na(unemployment))
+```
+
+
+## 공휴일 데이터 코딩
+
+미국의 휴일 정보를 가지고있는 `step_holiday` 함수를 이용해서 미국 공휴일을 모두 빼오도록 한다. 다음은 미국 공휴일 목록이다.
 
 ```{r}
 timeDate::listHolidays("US")
@@ -240,10 +309,18 @@ holiday_rec %<>%
 all_data <- holiday_rec %>% 
     select(-index_mod) %>% 
     left_join(all_data, y = ., by = c("date" = "date"))
-all_data %>% head()
+all_data %>% head() %>%
+  kable()
+  
+# custom weights
+# weight <- c(1, 5)[as_factor(all_data$is_holiday)]
 ```
 
 ## 전처리 과정 기록하기
+
+tidymodel의 편리한 장점 중 하나는 다양한 전처리 함수를 제공해서 실제로 전처리 코딩을 하지 않아도 되도록 자동화 시켜놓은 것이다. 전처리를 하고자 하는 방법을 recipe에 적어주면, 나중에 한번에 전처리를 시켜준다.
+
+다음의 recipe에는 `date` 변수에서 날짜 정보를 빼오고, `temperature, fuel_price, cpi, unemployment` 변수들을 10차항까지 코딩해서 넣어주는 전처리 과정이 들어있다.
 
 ```{r}
 walmart_recipe <- all_data %>% 
@@ -251,9 +328,11 @@ walmart_recipe <- all_data %>%
     step_date(date) %>%
     step_rm(date, date_dow) %>%
     step_mutate(store = as_factor(store),
-                dept = as_factor(dept)) %>%
+                dept = as_factor(dept)) %>%     
+    step_poly(temperature, fuel_price, cpi, unemployment,
+              degree = 10) %>%
     step_dummy(all_nominal()) %>% 
-    step_normalize(all_numeric(), -all_outcomes()) %>% 
+    step_normalize(all_numeric(), -all_outcomes()) %>%
     prep(training = all_data)
 
 print(walmart_recipe)
@@ -261,11 +340,13 @@ print(walmart_recipe)
 
 ## 전처리 데이터 짜내기 (`juice`)
 
-저장된 `recipe`의 전처리를 한 데이터를 `juice` 함수로 짜내보자. 
+저장된 `recipe`의 전처리를 한 데이터를 `juice` 함수로 짜내보자.
 
 ```{r}
 all_data2 <- juice(walmart_recipe)
-all_data2 %>% head() %>% dim()
+all_data2 %>% dim()
+all_data2 %>% head() %>% 
+  kable()
 ```
 
 # 모델 학습하기
@@ -279,17 +360,20 @@ test2 <- all_data2[-train_index,]
 
 # 튜닝을 위한 validation 데이터 설정
 set.seed(2021)
-validation_split <- vfold_cv(train2,  v = 10,
+validation_split <- vfold_cv(train2, v = 5,
                              strata = weekly_sales)
+# validation_split <- validation_split(train2, 
+#                                      strata = weekly_sales)
 ```
 
 ## 튜닝 스펙 설정하기
 
 ```{r}
-tune_spec <- linear_reg(penalty = tune(), mixture = 0) %>%
-  set_engine("glmnet")
+tune_spec <- linear_reg(penalty = tune(), mixture = tune()) %>% set_engine("glmnet")
 
-lambda_grid <- grid_regular(penalty(), levels = 100)
+param_grid <- grid_regular(penalty(),
+                           mixture(), levels = c(penalty = 50,
+                                                 mixture = 5))
 ```
 
 ## 워크플로우 `workflow()` 설정
@@ -307,7 +391,7 @@ doParallel::registerDoParallel()
 
 tune_result <- workflow %>% 
   tune_grid(validation_split,
-            grid = lambda_grid,
+            grid = param_grid,
             metrics = metric_set(rmse, mae))
 ```
 
@@ -321,31 +405,33 @@ tune_result %>%
 ```{r message=FALSE}
 tune_result %>%
   collect_metrics() %>%
+  filter(.metric == "mae") %>% 
   ggplot(aes(penalty, mean, color = .metric)) +
   geom_line(size = 1.5) +
   scale_x_log10() +
-  facet_wrap(vars(.metric)) +
+  facet_wrap(vars(as_factor(mixture))) +
   theme(legend.position = "none") +
   labs(title = "RMSE")
 ```
 
 ```{r}
-tune_result %>% show_best(metric = "mae")
+tune_result %>% show_best(metric = "mae") %>% kable()
 ```
 
 ```{r}
 tune_best <- tune_result %>% select_best(metric = "mae")
 tune_best$penalty
+tune_best$mixture
 ```
 
-# Set Ridge regression model and fitting (Ridge regeression 모델 설정 및 학습)
+# Elastic Net regeression 모델 설정 및 학습
 
-Set `mixture` is equal to zero refering the Ridge regression in `glmnet` since the 
+`mixture`와 `penalty` 모수를 튜닝 된 최적 모수로 학습시킨다.
 
 ```{r message=FALSE, warning=FALSE}
 ridge_model <- 
     linear_reg(penalty = tune_best$penalty, # tuned penalty
-               mixture = 0) %>% # lasso: 1, ridge: 0
+               mixture = tune_best$mixture) %>% # lasso: 1, ridge: 0
     set_engine("glmnet")
 
 ridge_fit <- 
@@ -355,7 +441,8 @@ ridge_fit <-
 options(max.print = 10)
 ridge_fit %>% 
     tidy() %>% 
-    filter(estimate > 0.001)
+    filter(estimate > 0.001) %>% 
+    kable()
 ```
 
 # Prediction and submit (예측 및 평가)
@@ -371,7 +458,7 @@ result %<>%
 submission <- read_csv(file.path(file_path, "sampleSubmission.csv.zip"))
 submission$Weekly_Sales <- result$.pred
 write.csv(submission, row.names = FALSE,
-          "ridge_regression_tuned.csv")
+          "ridge_regression_tuned_imput.csv")
 submission %>% head()
 ```
 
