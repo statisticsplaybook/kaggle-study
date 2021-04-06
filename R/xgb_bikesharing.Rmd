@@ -220,7 +220,7 @@ all_data %>%
     geom_line(size = 1.5, alpha = 0.7)
 ```
 
-# 결측치 처리 {.tabset .tabset-fade}
+# 결측치 처리 
 
 ```{r}
 sum(is.na(all_data))
@@ -269,8 +269,134 @@ all_data
 sum(is.na(all_data)) # count NA 
 ```
 
+# 공휴일 데이터 처리 
+
+주중과 주말, 공휴일의 사용패턴이 다르기 때문에 패턴이 같은 공휴일과 주말을 하나로 묶을 필요가 있음.
+```{r}
+holi <- all_data %>% 
+  select(datetime, holiday) %>% 
+  filter(holiday == 1) %>% 
+  mutate(year = year(datetime), 
+         month = month(datetime),
+         days = day(datetime)) %>% 
+  select(-c(datetime, holiday)) %>% 
+  distinct() %>%
+  arrange(year, month, days)
+holi
+
+all_data %>% 
+  filter(year == '2011' & month == '1' & day == '17') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 1.17 공휴일일 때
+all_data %>% 
+  filter(year == '2011' & month == '1' & day == '17') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 2.21 count = 0
+all_data %>% 
+  filter(year == '2011' & month == '2' & day == '21') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
 
 
+# 4.15 주중과 패턴 동일 
+all_data %>% 
+  filter(year == '2011' & month == '4' & day == '15') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 5.30 count = 0
+all_data %>% 
+  filter(year == '2011' & month == '5' & day == '30') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 7.4 주말과 패턴 비슷? 
+all_data %>% 
+  filter(year == '2011' & month == '7' & day == '4') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 7.4 주말과 패턴 비슷?
+all_data %>% 
+  filter(year == '2011' & month == '9' & day == '5') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 10.10 주말과 패턴 비슷 
+all_data %>% 
+  filter(year == '2011' & month == '10' & day == '10') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 11.11 주말과 패턴 비슷
+all_data %>% 
+  filter(year == '2011' & month == '11' & day == '11') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 11.24 count = 0
+all_data %>% 
+  filter(year == '2011' & month == '11' & day == '24') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 12.26 count = 0
+all_data %>% 
+  filter(year == '2011' & month == '12' & day == '26') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 1.16 일요일일 때 
+all_data %>% 
+  filter(year == '2011' & month == '1' & day == '16') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+# 1.14 금요일일 때 
+all_data %>% 
+  filter(year == '2011' & month == '1' & day == '14') %>% 
+    group_by(hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count)) +
+    geom_line(size = 1.5, alpha = 0.7)
+
+```
+```{r}
+train %>% 
+  mutate(count_fac = as.factor(count)) %>% 
+  select(count_fac) %>% 
+  mutate(count_if = ifelse(count_fac == 0, 1, 0)) %>% 
+  count(sum(count_if))
+
+```
 
 # Recipe + preperation {.tabset .tabset-fade}
 
