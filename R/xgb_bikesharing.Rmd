@@ -546,11 +546,19 @@ final_xgb %>%
 
 # 파일 제출 {.tabset .tabset-fade}
 ```{r}
+<<<<<<< Updated upstream
 subfile <- read_csv(file.path(file_path, "sampleSubmission.csv"))
 subfile$count <- pred_xgb$.pred
 
 write.csv(subfile, row.names = FALSE,
           file.path(file_path, "xgb_Submission_imp1.csv")) 
+=======
+subfile <- read_csv(file.path(file_path), "sampleSubmission.csv")
+subfile$count <- exp(pred_lasso$.pred) + 1
+
+write.csv(subfile, row.names = FALSE,
+          file.path(file_path), "xgb_Submission.csv") 
+>>>>>>> Stashed changes
 ```
 
 

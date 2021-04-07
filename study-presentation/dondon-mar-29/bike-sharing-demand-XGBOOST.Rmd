@@ -38,7 +38,7 @@ theme_set(theme_bw())
 ## Data load
 
 ```{r}
-file_path <- "../input/bike-sharing-demand/"
+file_path <- "C:/Users/sangdon/Desktop/kaggle-study/input/bike-sharing-demand/"
 files <- list.files(file_path)
 files
 ```
@@ -65,7 +65,7 @@ skim(test)
 
 # 데이터 전처리 {.tabset .tabset-fade}
 
-## 변수 제거 
+## Excluding variable 
 ```{r}
 train %>% 
     select(-c(casual, registered)) -> train
@@ -73,12 +73,12 @@ train %>%
 
 train data에는 casual, registered 변수가 존재하지만 test 데이터에는 존재하지 않음. 따라서 두 변수를 제외함. train data를 이용해서 test 데이터에 존재하지 않는 변수를 채우는 방법도 고려해볼 필요가 있음. 
 
-## train, test 데이터 통합 
+## Merge train, test  
 ```{r}
 all_data <- bind_rows(train, test)
 ```
 
-## 변수 속성 변경
+## Change variable type
 ```{r}
 all_data$season <- factor(all_data$season, labels = c('winter', 'fall', 'summer', 'spring'))
 all_data$weather <- as.factor(all_data$weather)
@@ -86,7 +86,7 @@ all_data$workingday <- as.factor(all_data$workingday)
 all_data$holiday <- as.factor(all_data$holiday)
 ```
 
-## 날짜 변수 생성 
+## Create date variable 
 ```{r}
 all_data %>% mutate(year = year(datetime), 
                     month = month(datetime),
@@ -97,16 +97,16 @@ all_data %>% mutate(year = year(datetime),
 all_data
 ```
 
-## wday, month factor로 변환 
+## Convert wday, month to factor 
 ```{r}
 all_data$wday <- factor(all_data$wday, labels = c('Sun', 'Mon', 'Tue', 'Wed', 'Thur', 'Fri', 'Sat'))
 all_data$month <- as.factor(all_data$month)
 all_data
 ```
 
-# 일변량 데이터 시각화 {.tabset .tabset-fade}
+# Univariate variable visualization {.tabset .tabset-fade}
 
-## count(target variable) 분포 
+## count(target variable) 
 ```{r, message=FALSE, warning=FALSE}
 all_data %>% 
     ggplot(aes(x = count)) + 
@@ -115,7 +115,7 @@ all_data %>%
 count 변수를 보면 0인 count가 많음 
 
 
-## atemp, temp 분포 
+## atemp, temp 
 ```{r, warning=FALSE, message=FALSE}
 p1 <- all_data %>% 
     ggplot(aes(x = atemp)) + 
@@ -129,23 +129,23 @@ grid.arrange(grobs = list(p1, p2), col = 2)
 temp, atemp 분포는 거의 비슷함 
 
 
-## 변수별 상관관계 및 분포 시각화(holiday) 
+## correlation and distribution for each variable (holiday) 
 ```{r}
 all_data %>% 
     select(holiday, temp, humidity, windspeed, count) %>% 
     GGally::ggpairs(mapping = aes(color = holiday))
 ```
 
-## 변수별 상관관계 및 분포 시각화(workingday)
+## correlation and distribution for each variable (workingday)
 ```{r}
 all_data %>% 
     select(workingday, temp, humidity, windspeed, count) %>% 
     GGally::ggpairs(mapping = aes(color = workingday))
 ```
 
-# factor 변수 시각화 {.tabset .tabset-fade}
+# factor variable visualization {.tabset .tabset-fade}
 
-## 계절(season)에 따른 시간 vs count 그래프 
+## season vs count 
 ```{r}
 all_data %>% 
     group_by(season, hour) %>% 
@@ -154,7 +154,7 @@ all_data %>%
     geom_line(size = 1.5, alpha = 0.7)
 ```
 
-## 날씨(weather)에 따른 시간 vs count 그래프
+## weather vs count 
 ```{r}
 all_data %>% 
     group_by(weather, hour) %>% 
@@ -163,7 +163,7 @@ all_data %>%
     geom_line(size = 1.5, alpha = 0.7)
 ```
 
-## 요일(wday)에 따른 시간 vs count 그래프
+## wday vs count
 ```{r}
 all_data %>% 
     group_by(wday, hour) %>% 
@@ -172,7 +172,7 @@ all_data %>%
     geom_line(size = 1.5, alpha = 0.7)
 ```
 
-## 휴일 유무(holiday)에 따른 시간 vs count 그래프
+## holiday vs count
 ```{r}
 all_data %>% 
     group_by(holiday, hour) %>% 
@@ -181,7 +181,7 @@ all_data %>%
     geom_line(size = 1.5, alpha = 0.7)
 ```
 
-## workingday에 따른 시간 vs count 그래프
+## workingday vs count
 ```{r}
 all_data %>% 
     group_by(workingday, hour) %>% 
@@ -190,7 +190,7 @@ all_data %>%
     geom_line(size = 1.5, alpha = 0.7)
 ```
 
-## month에 따른 시간 vs count 그래프
+## month vs count
 ```{r}
 all_data %>% 
     group_by(month, hour) %>% 
@@ -236,7 +236,7 @@ test2 <- all_data2[-train_index,]
 
 # XGboost setting {.tabset .tabset-fade}
 
-## XGBOOST hyperparameter 세팅 
+## XGBOOST hyperparameter setting 
 ```{r}
 xgb_spec <- boost_tree(
     trees = 1000, # 앙상블에 포함되는 tree의 수 
@@ -252,7 +252,7 @@ xgb_spec <- boost_tree(
 ```
 
 
-## Grid search 
+## Grid search setting 
 ```{r}
 xgb_grid <- grid_latin_hypercube(
     tree_depth(), 
@@ -267,7 +267,7 @@ xgb_grid <- grid_latin_hypercube(
 
 # XGboost workflow {.tabset .tabset-fade}
 
-## workflow에 모델 세팅 
+## workflow model setting 
 ```{r}
 xgb_wf <- workflow() %>% 
     add_formula(count~.) %>% 
@@ -276,7 +276,7 @@ xgb_wf <- workflow() %>%
 ```
 
 
-## 교차검증 데이터 세팅(cross validation) 
+## Create cross validation dataset 
 ```{r}
 set.seed(1234)
 vb_folds <- vfold_cv(train2, v = 5, strata = count)
@@ -284,7 +284,7 @@ vb_folds
 ```
 
 
-## hyperparameter 튜닝 
+## hyperparameter tuning 
 ```{r}
 library(tictoc)
 tic()
@@ -300,42 +300,34 @@ xgb_res <- tune_grid(
 toc()  
 ```
 
-## Final 모델 workflow에 세팅
+## Setting in the final model workflow
 ```{r}
 best_param <- select_best(xgb_res, 'rmse')
 final_xgb <- finalize_workflow(xgb_wf, best_param)
 final_xgb
 ```
 
-## final 모델 세팅
+## final model
 ```{r}
 final_model <- finalize_model(xgb_spec, best_param) 
 final_model # tuning이 끝난 최종 모형 
 ```
 
-## final model workflow에 업데이트  
+## Update workflow   
 ```{r}
 final_workflow <- xgb_wf %>% update_model(final_model)
 ```
 
-## final model 학습 
+## final model learning 
 ```{r}
 xgb_fit <- fit(final_workflow, data = train2)
 ```
 
 
-# 모델 학습 결과 {.tabset .tabset-fade}
+# Result {.tabset .tabset-fade}
 
-## 변수 중요도 그림(feature importance plot)
-```{r}
-library(vip) # feature importance plot 그리기 
-final_xgb %>% 
-    fit(data = train2) %>%  # iter, training_rmse 
-    pull_workflow_fit() %>% #  http://www.rebeccabarter.com/blog/2020-03-25_machine_learning/
-    vip(geom = 'point')
-```
 
-## 모델 예측값 산출 
+## Prediction  
 ```{r}
 pred_xgb <- 
     predict(xgb_fit, test2) %>% 
@@ -344,7 +336,7 @@ pred_xgb <-
 pred_xgb$.pred <- exp(pred_xgb$.pred)+1
 ```
 
-## 변수 중요도 그림(feature importance plot)
+## feature importance plot
 ```{r}
 library(vip) # feature importance plot 그리기 
 final_xgb %>% 
@@ -353,13 +345,15 @@ final_xgb %>%
     vip(geom = 'point')
 ```
 
-# 파일 제출 {.tabset .tabset-fade}
+# Submit file {.tabset .tabset-fade}
 ```{r}
-subfile <- read_csv(file.path(file_path, "sampleSubmission.csv")
-subfile$count <- exp(pred_lasso$.pred) + 1
+
+subfile <- read_csv(file.path(file_path, "sampleSubmission.csv"))
+
+subfile$count <- sum(exp(pred_xgb$.pred), 1)
 
 write.csv(subfile, row.names = FALSE,
-          file.path(file_path, "xgb_Submission.csv") 
+          file.path(file_path), "xgb_Submission.csv") 
 ```
 
 
