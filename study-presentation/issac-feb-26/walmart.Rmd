@@ -83,10 +83,8 @@ all_data2 %>% head()
 walmart_recipe <- 
     recipe(weekly_sales ~ .,
            data = all_data2) %>% 
-    step_normalize(all_numeric(), -all_outcomes())
-walmart_recipe
-
-walmart_recipe <- prep(walmart_recipe, training = all_data2)
+    step_normalize(all_numeric(), -all_outcomes()) %>% 
+    prep(training = all_data2)
 walmart_recipe
 
 all_data2 <- bake(walmart_recipe, 
