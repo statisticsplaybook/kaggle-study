@@ -1,0 +1,243 @@
+---
+title: "Make it simple."
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.align = "center")
+```
+
+
+![Photo steal from [here](https://connectedremag.com/das-in-building-wireless/walmart-verizon-explore-testing-5g-in-some-stores/)](https://connectedremag.com/wp-content/uploads/2020/03/walmart-5G-connected-real-estate.png)
+
+This posting is the part of my youtube channel study about [Kaggling with R](https://www.youtube.com/playlist?list=PLKtLBdGREmMlJCXjCpCi5B4KQ-TsFvAAi).
+
+# Back to the basic.
+
+I was playing around this old competion for a while. I have tried to use regression based model (Elastic net) and tree model (Random forest) using tidymodel. If you see the dataset, this is basically year, month, store, and department based sales price. Therefore, the tree based model performs better in this dataset by its nature. However, I was surprised to see that the comment from [David Thaler](https://www.kaggle.com/davidthaler), who took thefirst place of this competition and now he is the Grandmaster, saying that the group mean by month, store, dept, and is_holyday can beat regression and random forest easily. This notebook will show that the simple group mean can beat most of the competitors. 
+
+# 준비작업 {.tabset .tabset-fade}
+
+## Library load
+
+이번 포스팅에서 사용할 R패키지들을 불러오자. 특히 요즘 핫하디 핫한 `tidymodels` 사용하여 월마트 대회를 가지고 놀아본다. 또한 마이 빼이보릿 연산자들을 사용하기 위하여 `magrittr`를 불러왔다.🤣
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+library(tidymodels)
+library(tidyverse)
+library(magrittr)
+library(skimr)
+library(knitr)
+theme_set(theme_bw())
+```
+
+## Dataset load
+
+이 대회에서 주어진 데이터셋을 불러보자. 주어진 파일 리스트는 다음과 같다.
+
+```{r}
+file_path <- "../input/walmart-recruiting-store-sales-forecasting/"
+files <- list.files(file_path)
+files
+```
+각 변수의 이름을 `janitor` 패키지로 말끔하게 바꿔준다.
+
+```{r, message=FALSE}
+train <- read_csv(file.path(file_path, "train.csv.zip")) %>% 
+  janitor::clean_names()
+test <- read_csv(file.path(file_path, "test.csv.zip")) %>% 
+  janitor::clean_names()
+features <- read_csv(file.path(file_path, "features.csv.zip")) %>% 
+  janitor::clean_names()
+stores <- read_csv(file.path(file_path, "stores.csv")) %>% 
+  janitor::clean_names()
+```
+
+# 데이터 기본정보 확인{.tabset .tabset-fade}
+
+## Basic info.
+
+이 대회는 기본적으로 간단한 대회이다. 첫번째 스터디용 대회로 선택을 한 이유이기도 하다. 주 데이터는 42만개의 train 샘플과 11만개의 test 샘플로 구성이 되어있다.
+
+```{r}
+dim(train)
+dim(test)
+```
+
+변수명을 살펴보면, 월마트 가맹점을 뜻하는 `store` 변수와 매장안의 부서들을 나타내는 `dept`, 날짜 정보를 가지고 있는 `date`와 `is_holiday`, 마지막으로 우리의 target 변수인 `weekly_sales`가 있는 것을 확인 할 수 있다.
+
+```{r}
+names(train)
+names(test)
+```
+
+## train and test data snippet
+
+```{r}
+head(train) %>% kable()
+head(train) %>% kable()
+```
+
+## store data
+
+`store` 데이터는 상대적으로 간단하다. 각 점포에 대한 사이즈와 타입변수가 담겨져 있다. 타입변수는 월마트에서 운영하는 supercenter와 같이 매장의 성격을 나타내는 변수이다.
+
+```{r}
+dim(stores)
+head(stores) %>% kable()
+```
+
+
+## feature data
+
+`feature` 데이터는 조금 복잡한데, 각 점포별로 각 주마다의 정보가 담겨있는 것을 알 수 있다.
+
+```{r}
+dim(features)
+length(unique(features$store)) * length(unique(features$date))
+
+head(features) %>% kable()
+```
+
+일단 `NA`의 존재가 많음. `skim()` 함수의 complete 정보를 통하여 알아 볼 수 있다. 또한, 대회 데이터에 대한 설명을 보면 `mark_down1-5` 변수의 경우 월마트에서 진행하고 있는 Promotion을 의미한다. 하지만 이 변수의 경우 2011년 11월 이후에 날짜에 대하여만 접근 가능하고, 그 이전의 경우에는 `NA`로 채워져있다. 이러한 `NA`를 어떻게 사용할 것인가가 이 대회의 핵심일 것 같다.
+
+# 탐색적 데이터 분석 및 시각화 {.tabset .tabset-fade}
+
+## `weekly_sales`
+
+먼저 우리의 예측 목표인 주간 세일변수 `weekly_sales`를 시각화 해보도록 하자.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+  ggplot(aes(x = weekly_sales)) +
+  geom_histogram()
+```
+
+매출액의 분포라서 오른쪽으로 엄청 치우쳐있는 것을 알 수 있다. 이런 경우 보통 `log` 함수를 취해줘서 분포의 치우침을 잡아준다. 이렇게 분포 치우침을 잡아주는 이유는 회귀분석 같은 전통적인 기법의 경우 데이터에 섞여있는 잡음의 분포를 정규분포같이 대칭인 분포로 가정하는 경우가 많기 때문이다. 
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+    ggplot(aes(x = sign(weekly_sales) * log(abs(weekly_sales) + 2))) +
+    geom_histogram() +
+    labs(title = "Transformed distribution of weekly sales 1",
+         x = "weekly_sales")
+```
+
+`log`를 취해주었을 경우 다음과 같이 치우침이 많이 잡히는 것을 알 수 있다. 하지만 위의 분포 역시 왼쪽으로 치우쳐 있는 것을 알 수 있다. 분포를 조금 더 종모양으로 만들어주기 위하여 제곱근을 이용했다. 아래를 보면 분포가 종모양처럼 예뻐진 것을 알 수 있다.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+    ggplot(aes(x = sign(weekly_sales) * (abs(weekly_sales))^(1/5))) +
+    geom_histogram() +
+    labs(title = "Transformed distribution of weekly sales 2",
+         x = "weekly_sales")
+```
+
+# 전처리 레시피(`recipe`) 만들기
+
+tidymodels의 전처리 패키지지 recipe을 사용하여 전처리를 하도록하자.
+
+## `all_data` 합치기
+
+먼저 `store` 와 `features` 데이터에 있는 정보를 `train`과 `test` 데이터에 옮겨오자. 일단 결측치가 없는 변수들만 가져오고, 추후에 결측치가 있는 변수인 cpi와 unemployment, mark_down 변수들을 가져오자.
+
+```{r}
+train$weekly_sales <- sign(train$weekly_sales) * (abs(train$weekly_sales))^(1/5)
+all_data <- bind_rows(train, test)
+all_data %>% head()
+names(all_data)
+dim(all_data)
+```
+
+## 전처리 과정 기록하기
+
+tidymodel의 편리한 장점 중 하나는 다양한 전처리 함수를 제공해서 실제로 전처리 코딩을 하지 않아도 되도록 자동화 시켜놓은 것이다. 전처리를 하고자 하는 방법을 recipe에 적어주면, 나중에 한번에 전처리를 시켜준다.
+
+다음의 recipe에는 `date` 변수에서 날짜 정보를 빼오고, `temperature, fuel_price, cpi, unemployment` 변수들을 10차항까지 코딩해서 넣어주는 전처리 과정이 들어있다.
+
+```{r}
+walmart_recipe <- all_data %>% 
+    recipe(weekly_sales ~ .) %>%
+    step_mutate(
+      year = lubridate::year(date),
+      week = lubridate::week(date)) %>% 
+    step_rm(date) %>% 
+    prep(training = all_data)
+
+print(walmart_recipe)
+```
+
+## 전처리 데이터 짜내기 (`juice`)
+
+저장된 `recipe`의 전처리를 한 데이터를 `juice` 함수로 짜내보자.
+
+```{r}
+all_data2 <- juice(walmart_recipe)
+all_data2 %>% dim()
+all_data2 %>% head() %>% 
+  kable()
+```
+
+# 모델 학습하기
+
+## 데이터 나누기
+
+```{r}
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+```
+
+## 점포-부서-월별 평균
+
+```{r}
+mean_model <- train2 %>% 
+  group_by(store, dept, week, is_holiday) %>% 
+  summarise(weekly_sales = mean(weekly_sales, na.rm = TRUE))
+
+median_model <- train2 %>% 
+  group_by(store, dept, week, is_holiday) %>% 
+  summarise(weekly_sales = median(weekly_sales, na.rm = TRUE))
+
+result <- test2 %>% 
+  select(-weekly_sales) %>% 
+  left_join(y = mean_model, 
+            by = c("store"="store",
+                   "dept" ="dept",
+                   "week"="week",
+                   "is_holiday"="is_holiday")) %>% 
+  select(weekly_sales) %>% 
+  mutate(weekly_sales = sign(weekly_sales) * (abs(weekly_sales)^5)) %>% 
+  unlist() %>% as.numeric()
+
+# Manage NA's
+result %>% head()
+is.na(result) %>% sum()
+result[is.na(result)] <- 0
+```
+
+# 제출하기
+
+```{r}
+submission <- read_csv(file.path(file_path, "sampleSubmission.csv.zip"))
+submission$Weekly_Sales <- result
+write.csv(submission, row.names = FALSE,
+          "mean_model_aprl5.csv")
+submission %>% head()
+```
+
+
