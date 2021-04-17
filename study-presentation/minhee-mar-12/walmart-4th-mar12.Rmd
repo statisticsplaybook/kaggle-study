@@ -1,0 +1,251 @@
+---
+title: "Predicting Weekly Sales Using Walmart Data"
+author: "Minhee Seo"
+date: "3/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<!-- Special thanks to previous presenters, whom I relied on for their tidy coding (I am a base R user) -->
+
+## Purpose
+
+Find out which covariate (and model) increases the score/ranking
+
+## Steps/Sections
+
+1. Clean data
+2. Exploration
+3. Fitting a Model
+<!--3. Model selection (lm, random forest)-->
+4. Prediction
+5. Submission
+
+## Loading libraries and walmart data
+
+
+Based on prior examinations, we have a better understanding of the data structure and variables. I will be skipping redundant comments/explanations.
+
+
+```{r, message=FALSE, warning=FALSE}
+# load libraries
+library(tidyverse)
+library(tidymodels)
+library(lubridate)
+library(skimr)
+library(parallel)
+library(plyr)
+
+# load data
+train_path <- file.path(here::here(),"data/walmart/train.csv.zip")
+test_path <- file.path(here::here(),"data/walmart/test.csv.zip")
+features_path <- file.path(here::here(),"data/walmart/features.csv.zip")
+stores_path <- file.path(here::here(),"data/walmart/stores.csv")
+train <- read_csv(train_path)
+test <- read_csv(test_path)
+features <- read_csv(features_path)
+stores <- read_csv(stores_path)
+
+glimpse(train) # or use skim(train)
+glimpse(test)
+glimpse(features) # missing values in unemployment, markdown vars, cpi
+glimpse(stores)
+# unit of analysis: week
+
+# set seed
+set.seed(1234)
+```
+
+
+```{r}
+# clean variable names
+train <- train %>% janitor::clean_names()
+test <- test %>% janitor::clean_names()
+features <- features %>% janitor::clean_names()
+stores <- stores %>% janitor::clean_names()
+
+# make sure department, stores are in the test set
+length(unique(train$store)) # gauge # of stores
+length(unique(test$store)) # gauge # of stores
+length(unique(features$store)) # gauge # of stores
+length(unique(stores$store)) # gauge # of stores
+
+# merge w/ store and features data
+# train
+wal.dat <- train %>% 
+  left_join(features, 
+            by =c("store", "date","is_holiday"))
+wal.dat <- wal.dat %>% 
+  left_join(stores, by ="store")
+skim(wal.dat) # cpi and unemp not missing
+# test
+test <- test %>% 
+  left_join(features, 
+            by =c("store", "date","is_holiday"))
+test <- test %>% 
+  left_join(stores, by ="store")
+skim(test) # cpi and unemp missing
+```
+
+
+## Exploration
+
+Again, previously, we examined that variabilities of weekly sales exist among departments and stores. We also saw that weekly sales are peaked during holiday seasons (particularly Thanksgiving, Christmas). 
+
+
+```{r}
+# 1. Adjusting cyclical/seasonal/temporal pattern
+# seasonal data -> weekly average temperature can adjust cyclical/seasonal variation
+#               -> alternatively, we can use weekly fuel price (peak fuel price in summer)
+#               -> H: negative corr between temperature/fuel price and weekly sales
+#               -> Nov/Dec dummy variable, Holiday dummy variable (to capture holiday effects)
+cor(wal.dat$weekly_sales, wal.dat$fuel_price, use="complete.obs", method="pearson") 
+cor(wal.dat$weekly_sales, wal.dat$temperature, use="complete.obs", method="pearson") 
+
+
+wal.dat <- wal.dat %>% 
+    mutate(
+        week=week(date),
+        month = month(date),
+        novDec= ifelse(month >=11, 1, 0),
+        holiday = ifelse(is_holiday=="TRUE", 1, 0))
+
+test <- test %>% 
+    mutate(
+        week=week(date),
+        month = month(date),
+        novDec= ifelse(month >=11, 1, 0),
+        holiday = ifelse(is_holiday=="TRUE", 1, 0))
+
+wal.dat <- wal.dat %>% 
+    select(-c(is_holiday, date, month))
+test <- test %>% 
+    select(-c(is_holiday, date, month))
+
+# 2. Adjusting for economic factors
+# H: negative corr between unemployment rate, cpi (Consumer Price Index; inflation) and weekly sales
+cor(wal.dat$weekly_sales, wal.dat$cpi, use="complete.obs", method="pearson") 
+cor(wal.dat$weekly_sales, wal.dat$unemployment, use="complete.obs", method="pearson") 
+
+
+# 3. Markdowns and weekly sales
+# H: positive corr between sales and markdowns
+markdown.dat <- wal.dat[which(is.na(wal.dat$weekly_sales)==F),] %>% 
+    select(c(mark_down1,mark_down2,mark_down3,mark_down4,mark_down5, weekly_sales)) 
+cor(markdown.dat, method = "pearson", use="complete.obs")
+# pca or data reduction technique?
+
+# 4. store/department attributes
+# H: positive correlation between size and weekly sales
+cor(wal.dat$weekly_sales, wal.dat$size, use="complete.obs", method="pearson") 
+# fit binary linear reg to check H: H: variability by type, store, and department
+#summary(lm(weekly_sales ~ as.factor(dept), wal.dat)) # case-wise deletion
+#summary(lm(weekly_sales ~ as.factor(store), wal.dat)) # case-wise deletion
+#summary(lm(weekly_sales ~ type, wal.dat)) # case-wise deletion
+#alternatively,
+ddply(wal.dat, .(type), summarize,  sales=mean(weekly_sales), size=mean(size))
+ddply(wal.dat, .(store), summarize,  sales=mean(weekly_sales), size=mean(size))
+ddply(wal.dat, .(dept), summarize,  sales=mean(weekly_sales), size=mean(size))
+
+wal.dat <- wal.dat %>% 
+    select(-c(dept))
+test <- test %>% 
+    select(-c(dept))
+
+# 5. Investigate missingness
+library(naniar)
+# mostly, all five rows are missing
+wal.dat %>%
+  select(mark_down1,mark_down2,mark_down3,mark_down4,mark_down5) %>%
+  gg_miss_upset()
+# check associations (MNAR, MAR, MCAR); implement multiple imputation using mice package
+# how to "pool" results from each data using tidymodel?
+```
+
+## Fitting Models
+
+```{r}
+# create train and validation data (i.e. analysis and assessment data)
+#set.seed(123)
+#walmart.cv <- vfold_cv(wal.dat, strata = type, prop = 0.75)
+# alternatively, we can adopt loocv and other bootstrap approaches
+
+# due to the error cased by step_num2factor from the recipe, using an as.factor command
+wal.dat$novDec <- as.factor(wal.dat$novDec)
+wal.dat$holiday <- as.factor(wal.dat$holiday)
+wal.dat$store <- as.factor(wal.dat$store)
+
+test$novDec <- as.factor(test$novDec)
+test$holiday <- as.factor(test$holiday)
+test$store <- as.factor(test$store)
+
+all_data <- bind_rows(wal.dat, test)
+
+# recipe:
+# standardization of numerical predictors (alternatively we can use step_log or step_poly if they have non-linear relationship)
+# imputation (median)
+# nominal predictors -> dummy variables
+# pca for markdown variables
+# remove columns with a single value (assumption: not a influencial predictor)
+# remove columns with high corr.
+walmart_recipe <- 
+    recipe(weekly_sales ~ ., data = all_data) %>% 
+    step_medianimpute(mark_down1,mark_down2,mark_down3,mark_down4,mark_down5, cpi, unemployment) %>%    
+    step_zv(all_predictors()) %>% # remove columns with a single value (i.e. zero variance)
+    step_corr(all_numeric(),threshold = 0.9) %>% # remove vars with large corr.
+    step_dummy(all_nominal(), -all_outcomes()) %>% 
+    step_normalize(all_predictors(), -all_nominal())
+    #step_num2factor(c(novDec, holiday), transform = function(x) x + 1,levels = c("0", "1")) %>% 
+    #step_num2factor(c(week, store), levels = c("0", "1")) %>% 
+    #step_pca(mark_down1,mark_down2,mark_down3,mark_down4,mark_down5, num_comp = 3)
+walmart_recipe
+
+wal.prep<- prep(walmart_recipe, training = all_data) 
+wal.prep
+wal.dat.baked <- bake(wal.prep, 
+                  new_data = all_data)
+wal.dat.baked
+
+# separate data again
+index <- seq_len(nrow(wal.dat))
+wal.dat.train <- wal.dat.baked[index,]
+wal.dat.test <- wal.dat.baked[-index,]
+
+# linear regression
+lm_model <-
+    linear_reg() %>%
+    set_mode("regression") %>%
+    set_engine("lm")
+
+lm.mod1 <- 
+    lm_model %>% 
+    fit(weekly_sales ~ ., data = wal.dat.train)
+
+lm.mod1
+
+# need to fit other models + hierarchical model
+```
+
+
+
+## Prediction and Submission
+
+```{r}
+predict.sales <- predict(lm.mod1, new_data = wal.dat.test)
+predict.sales
+
+subfile <- read_csv(file.path(here::here(),
+                    "data/walmart/sampleSubmission.csv.zip"))
+subfile$Weekly_Sales <- predict.sales$.pred
+
+write.csv(subfile, row.names = FALSE,
+          file.path(here::here(),"/data/walmart/baseline-features-lm-03122021.csv"))
+
+# 이삭님: 20238.71579
+# 성균님: 3536.56464
+# 민희: 19686.18624 , 육백몇등?
+```
+

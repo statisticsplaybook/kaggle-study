@@ -1,0 +1,469 @@
+---
+title: "Walmart competition with Tidymodels"
+subtitle: "Elastic net with group mean"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.align = "center")
+```
+
+![Photo steal from [here](https://connectedremag.com/das-in-building-wireless/walmart-verizon-explore-testing-5g-in-some-stores/)](https://connectedremag.com/wp-content/uploads/2020/03/walmart-5G-connected-real-estate.png)
+
+This post is used as study material in my Youtube channel video series; [Kaggle study with R](https://www.youtube.com/playlist?list=PLKtLBdGREmMlJCXjCpCi5B4KQ-TsFvAAi)
+
+# Preparation {.tabset .tabset-fade}
+
+## Library load
+
+Load our favorite R packages.
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+library(tidymodels)
+library(tidyverse)
+library(magrittr)
+library(skimr)
+library(knitr)
+theme_set(theme_bw())
+```
+
+## Dataset load
+
+Data set file list:
+
+```{r}
+file_path <- "../input/walmart-recruiting-store-sales-forecasting/"
+files <- list.files(file_path)
+files
+```
+We change the name of varible using `janitor` package.
+
+```{r, message=FALSE}
+train <- read_csv(file.path(file_path, "train.csv.zip")) %>% 
+  janitor::clean_names()
+test <- read_csv(file.path(file_path, "test.csv.zip")) %>% 
+  janitor::clean_names()
+features <- read_csv(file.path(file_path, "features.csv.zip")) %>% 
+  janitor::clean_names()
+stores <- read_csv(file.path(file_path, "stores.csv")) %>% 
+  janitor::clean_names()
+```
+
+# Data set information {.tabset .tabset-fade}
+
+## Basic info.
+
+Simple structure: 
+
+* About 420,000 train sample
+* About 110,000 train sample
+
+The number of variables are 4 with 1 dependent variable.
+
+```{r}
+dim(train)
+dim(test)
+```
+
+* `store`: walmart store
+* `dept` : department in store
+* `date` : date information
+* `is_holiday`: information about holidays.
+
+```{r}
+names(train)
+names(test)
+```
+
+## store data
+
+`store` has type and size information about store.
+
+```{r}
+dim(stores)
+head(stores)
+```
+
+## feature data
+
+`feature` has some interesting variables such as temperature, fule price, markdown 1 - 5 (promotion indicator).
+
+```{r}
+dim(features)
+length(unique(features$Store)) * length(unique(features$Date))
+
+head(features)
+```
+
+
+# EDA and Visualization {.tabset .tabset-fade}
+
+## `weekly_sales`
+
+The distribution of `weekly_sales` is highly skewed.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+  ggplot(aes(x = weekly_sales)) +
+  geom_histogram()
+```
+
+Transformed to symmetrical distribution using power.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+    ggplot(aes(x = sign(weekly_sales) * (abs(weekly_sales))^(1/5))) +
+    geom_histogram() +
+    labs(title = "Transformed distribution of weekly sales 2",
+         x = "weekly_sales")
+```
+
+## NA analysis
+
+```{r message=FALSE, warning=FALSE, class.source = 'fold-hide'}
+library(naniar)
+features %>% 
+  select_if(~sum(is.na(.)) > 0) %>% # columns with NA
+  gg_miss_var()
+```
+
+`gg_miss_var()`를 통하여 현재 mark_down1-5 변수, 그리고, unemploment와 cpi가 결측치가 존재하는 것을 확인하였다.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+features %>% 
+  select_if(~sum(is.na(.)) > 0) %>%
+  gg_miss_upset()
+```
+
+# Preprocessing with `recipe`
+
+## Combine data to `all_data`
+
+It is convenient to have `all_data` for the pre-processing. Also, we join [group mean model]() with `all_data`. 
+
+```{r}
+# train weekly_sales 변경
+train %<>%
+  mutate(weekly_sales = sign(weekly_sales) * (abs(weekly_sales))^(1/5))
+all_data <- bind_rows(train, test)
+all_data <- left_join(all_data, stores, by = c("store"= "store"))
+all_data <- features %>% 
+    select(-c(starts_with("mark"), is_holiday)) %>% 
+    left_join(all_data, y = ., by = c("store"= "store",
+                                      "date" = "date"))
+
+group_mean <- read_csv("./group_mean.csv") %>% janitor::clean_names()
+all_data$group_mean <- group_mean$group_mean
+all_data %<>%
+  mutate(group_mean = sign(group_mean) * (abs(group_mean))^(1/5))
+
+names(all_data)
+dim(all_data)
+```
+
+## `NA` cpi and unemployment
+
+Imputation for `cpi` and `unemployment`
+
+```{r}
+all_data %>% 
+    mutate(year = lubridate::year(date)) %>% 
+    mutate(month = lubridate::month(date)) %>% 
+    group_by(year, month) %>% 
+    summarise(count_na_cpi = sum(is.na(cpi)),
+              count_na_unemp = sum(is.na(unemployment))) %>% 
+    filter(count_na_cpi > 0 | count_na_unemp > 0)
+```
+
+## `cpi` and `unemployment` imputation
+
+I used linear regression for imputation.
+
+```{r}
+impute_var <- function(var, all_data, var_name){
+  var_train <- all_data %>% 
+    select({{var}}, date, store, dept) %>% 
+    filter(!is.na({{var}}))
+  var_test <- all_data %>% 
+    select({{var}}, date, store, dept) %>% 
+    filter(is.na({{var}}))
+  
+  var_rec <- recipe(as.formula(paste0(var_name, "~ .")), var_train) %>% 
+      step_mutate(store = as_factor(store),
+                  dept = as_factor(dept),
+                  year = as_factor(lubridate::year(date)),
+                  month = as_factor(lubridate::month(date))) %>%
+      step_dummy(store, dept, year, month) %>% 
+      prep(training = var_train)
+  var_train2 <- juice(var_rec)
+  var_test2 <- bake(var_rec, var_test)
+  
+  lm_model <- 
+      linear_reg() %>%
+      set_engine("lm")
+  
+  lm_fit <- 
+      lm_model %>% 
+      fit(as.formula(paste0(var_name, "~ .")), data = var_train2)
+  
+  var_impute <- predict(lm_fit, var_test2)
+  var_impute$.pred
+}
+result_cpi <- impute_var(cpi, all_data, "cpi")
+result_ump <- impute_var(unemployment, all_data, "unemployment")
+all_data$cpi[is.na(all_data$cpi)] <- result_cpi
+all_data$unemployment[is.na(all_data$unemployment)] <- result_ump
+all_data$group_mean[is.na(all_data$group_mean)] <- 0
+all_data %>% tail %>% kable()
+```
+
+```{r}
+all_data %>% 
+    summarise_all(~sum(is.na(.)))
+```
+
+## `NA` imputation `markdown 1-5`
+
+```{r}
+mean_markdown <- features %>%
+    filter(date >= "2012-01-01" & date < "2013-01-01") %>% 
+    mutate(month = lubridate::month(date)) %>% 
+    group_by(store, month) %>% 
+    summarise(across(mark_down1:mark_down5, mean, na.rm = T))
+
+mean_markdown %>% 
+    summarise_all(~sum(is.na(.))) %>% 
+    colSums()
+
+markdown_features <- features %>% 
+    mutate(month = lubridate::month(date)) %>% 
+    left_join(y = mean_markdown, by = c("store"= "store",
+                                        "month" = "month")) %>% 
+    mutate(mark_down1 = if_else(is.na(mark_down1.x), mark_down1.y, mark_down1.x),
+           mark_down2 = if_else(is.na(mark_down1.x), mark_down2.y, mark_down2.x),
+           mark_down3 = if_else(is.na(mark_down1.x), mark_down3.y, mark_down3.x),
+           mark_down4 = if_else(is.na(mark_down1.x), mark_down4.y, mark_down4.x),
+           mark_down5 = if_else(is.na(mark_down1.x), mark_down5.y, mark_down5.x)) %>% 
+    select(store, date, mark_down1:mark_down5)
+
+all_data <- markdown_features %>% 
+    left_join(all_data, y = ., by = c("store"= "store",
+                                      "date" = "date"))
+
+options(max.print = 20)
+names(all_data)
+```
+
+```{r}
+all_data %>% 
+    summarise_all(~sum(is.na(.)))
+```
+
+
+## 공휴일 데이터 코딩
+
+미국의 휴일 정보를 가지고있는 `step_holiday` 함수를 이용해서 미국 공휴일을 모두 빼오도록 한다. 다음은 미국 공휴일 목록이다.
+
+```{r}
+timeDate::listHolidays("US")
+```
+
+```{r}
+library(lubridate)
+
+datedb <- data.frame(date = ymd("2010-1-1") + days(0:(365*4))) %>% 
+    filter(date > "2010-01-29" & date < "2013-07-27") %>% 
+    mutate(index = 0:(length(date)-1))
+datedb$date %>% range()
+all_data$date %>% range()
+
+holiday_rec <- recipe(~ date + index, datedb) %>% 
+    step_holiday(date,
+                 holidays = timeDate::listHolidays("US")) %>% 
+    step_mutate(index_mod = index %/% 7) %>% 
+    prep(training = datedb) %>% 
+    juice()
+
+holiday_rec %<>%
+    select(-date) %>% 
+    select(starts_with("date"), index_mod) %>% 
+    group_by(index_mod) %>% 
+    summarise_all(sum) %>% 
+    mutate(date = all_data$date %>% unique()) %>% 
+    select(date, dplyr::everything())
+
+all_data <- holiday_rec %>% 
+    select(-index_mod) %>% 
+    left_join(all_data, y = ., by = c("date" = "date"))
+all_data %>% head() %>%
+  kable()
+  
+# custom weights
+# weight <- c(1, 5)[as_factor(all_data$is_holiday)]
+```
+
+## preprocessing recipe
+
+```{r}
+walmart_recipe <- all_data %>% 
+    recipe(weekly_sales ~ .) %>%
+    step_mutate(year = lubridate::year(date)) %>%   
+    step_mutate(month = lubridate::month(date)) %>%
+    step_mutate(week = lubridate::week(date)) %>% 
+    step_rm(date, starts_with("date")) %>%
+    step_medianimpute(mark_down1, mark_down2,
+                      mark_down3, mark_down4, mark_down5) %>%
+    prep(training = all_data)
+
+print(walmart_recipe)
+```
+
+## `juice` the preprocessed data
+
+```{r}
+all_data2 <- juice(walmart_recipe)
+all_data2 %>% dim()
+all_data2 %>% head() %>% 
+  kable()
+```
+
+# Model learning
+
+## Data split
+
+```{r}
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+
+# train2_isholiday <- train2 %>% filter(is_holiday == TRUE)
+
+set.seed(2021)
+
+validation_split <- vfold_cv(train2, v = 10, strata = weekly_sales)
+```
+
+## Tunning spec
+
+```{r}
+tune_spec <- linear_reg(penalty = tune(),
+                        mixture = tune()) %>%
+  set_engine("glmnet")
+
+param_grid <- grid_regular(penalty(), 
+                            mixture(),
+                            levels = list(penalty = 100,
+                                          mixture = 10))
+```
+
+## `workflow()` set
+
+```{r}
+workflow <- workflow() %>%
+  add_model(tune_spec) %>% 
+  add_formula(weekly_sales ~ .)
+```
+
+## Tune grid
+
+```{r tunerf}
+library(doParallel)
+Cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(Cluster)
+
+library(tictoc)
+tic()
+tune_result <- workflow %>% 
+  tune_grid(validation_split,
+            grid = param_grid,
+            metrics = metric_set(mae))
+toc()
+```
+
+```{r}
+tune_result$.notes
+tune_result %>% 
+  collect_metrics()
+```
+
+## Visualization of the tunning result
+
+```{r}
+tune_best <- tune_result %>% select_best(metric = "mae")
+tune_best$penalty
+tune_best$mixture
+```
+
+
+```{r message=FALSE}
+tune_result %>%
+  collect_metrics() %>%
+  filter(mixture == tune_best$mixture) %>% 
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_line(size = 1.5) +
+  scale_x_log10() +
+  theme(legend.position = "none") +
+  labs(title = "MAE")
+```
+
+
+```{r}
+tune_result %>% show_best(metric = "mae") %>% kable()
+```
+
+
+# Set Elastic net regression model and fitting
+
+`mixture` parameter determines the proportion of Lasso regression in the Elastic net.
+
+```{r trainrf, message=FALSE, warning=FALSE}
+cores <- parallel::detectCores() -1
+cores
+
+elastic_model <- 
+    linear_reg(penalty = tune_best$penalty,
+               mixture = tune_best$mixture) %>%
+    set_engine("glmnet")
+
+elastic_fit <- 
+    elastic_model %>% 
+    fit(weekly_sales ~ ., data = train2)
+
+options(max.print = 10)
+elastic_fit %>% 
+    tidy() %>% 
+    filter(estimate > 0.001)
+```
+
+# Prediction and submit (예측 및 평가)
+
+```{r warning=FALSE}
+result <- predict(elastic_fit, test2)
+result %>% head()
+result %<>%
+  mutate(.pred = sign(.pred) * (abs(.pred)^5))
+```
+
+```{r}
+submission <- read_csv(file.path(file_path, "sampleSubmission.csv.zip"))
+submission$Weekly_Sales <- result$.pred
+write.csv(submission, row.names = FALSE,
+          "elastic_with_groupmean_tuned.csv")
+submission %>% head()
+```
+
+

@@ -1,0 +1,496 @@
+---
+title: "월마트 대회 with Tidymodels"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.align = "center")
+```
+
+Random Forest 튜닝에 대하여 알아보자.
+
+![Photo steal from [here](https://connectedremag.com/das-in-building-wireless/walmart-verizon-explore-testing-5g-in-some-stores/)](https://connectedremag.com/wp-content/uploads/2020/03/walmart-5G-connected-real-estate.png)
+
+본 포스팅은 [슬기로운 통계생활 캐글 R 스터디](https://www.youtube.com/playlist?list=PLKtLBdGREmMlJCXjCpCi5B4KQ-TsFvAAi) 발표용 포스팅입니다.
+
+# 준비작업 {.tabset .tabset-fade}
+
+## Library load
+
+이번 포스팅에서 사용할 R패키지들을 불러오자. 특히 요즘 핫하디 핫한 `tidymodels` 사용하여 월마트 대회를 가지고 놀아본다. 또한 마이 빼이보릿 연산자들을 사용하기 위하여 `magrittr`를 불러왔다.🤣
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+library(tidymodels)
+library(tidyverse)
+library(magrittr)
+library(skimr)
+library(knitr)
+theme_set(theme_bw())
+```
+
+## Dataset load
+
+이 대회에서 주어진 데이터셋을 불러보자. 주어진 파일 리스트는 다음과 같다.
+
+```{r}
+file_path <- "../input/walmart-recruiting-store-sales-forecasting/"
+files <- list.files(file_path)
+files
+```
+각 변수의 이름을 `janitor` 패키지로 말끔하게 바꿔준다.
+
+```{r, message=FALSE}
+train <- read_csv(file.path(file_path, "train.csv.zip")) %>% 
+  janitor::clean_names()
+test <- read_csv(file.path(file_path, "test.csv.zip")) %>% 
+  janitor::clean_names()
+features <- read_csv(file.path(file_path, "features.csv.zip")) %>% 
+  janitor::clean_names()
+stores <- read_csv(file.path(file_path, "stores.csv")) %>% 
+  janitor::clean_names()
+```
+
+# 데이터 기본정보 확인{.tabset .tabset-fade}
+
+## Basic info.
+
+이 대회는 기본적으로 간단한 대회이다. 첫번째 스터디용 대회로 선택을 한 이유이기도 하다. 주 데이터는 42만개의 train 샘플과 11만개의 test 샘플로 구성이 되어있다.
+
+```{r}
+dim(train)
+dim(test)
+```
+
+변수명을 살펴보면, 월마트 가맹점을 뜻하는 `store` 변수와 매장안의 부서들을 나타내는 `dept`, 날짜 정보를 가지고 있는 `date`와 `is_holiday`, 마지막으로 우리의 target 변수인 `weekly_sales`가 있는 것을 확인 할 수 있다.
+
+```{r}
+names(train)
+names(test)
+```
+
+## train data
+
+```{r}
+skim(train)
+```
+
+## test data
+
+```{r}
+skim(test)
+```
+
+## store data
+
+`store` 데이터는 상대적으로 간단하다. 각 점포에 대한 사이즈와 타입변수가 담겨져 있다. 타입변수는 월마트에서 운영하는 supercenter와 같이 매장의 성격을 나타내는 변수이다.
+
+```{r}
+dim(stores)
+head(stores)
+```
+
+
+```{r}
+skim(stores)
+```
+
+## feature data
+
+`feature` 데이터는 조금 복잡한데, 각 점포별로 각 주마다의 정보가 담겨있는 것을 알 수 있다.
+
+```{r}
+dim(features)
+length(unique(features$Store)) * length(unique(features$Date))
+
+head(features)
+```
+
+일단 `NA`의 존재가 많음. `skim()` 함수의 complete 정보를 통하여 알아 볼 수 있다. 또한, 대회 데이터에 대한 설명을 보면 `mark_down1-5` 변수의 경우 월마트에서 진행하고 있는 Promotion을 의미한다. 하지만 이 변수의 경우 2011년 11월 이후에 날짜에 대하여만 접근 가능하고, 그 이전의 경우에는 `NA`로 채워져있다. 이러한 `NA`를 어떻게 사용할 것인가가 이 대회의 핵심일 것 같다.
+
+```{r}
+skim(features)
+```
+
+
+# 탐색적 데이터 분석 및 시각화 {.tabset .tabset-fade}
+
+## `weekly_sales`
+
+먼저 우리의 예측 목표인 주간 세일변수 `weekly_sales`를 시각화 해보도록 하자.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+  ggplot(aes(x = weekly_sales)) +
+  geom_histogram()
+```
+매출액의 분포라서 오른쪽으로 엄청 치우쳐있는 것을 알 수 있다. 이런 경우 보통 `log` 함수를 취해줘서 분포의 치우침을 잡아준다. 이렇게 분포 치우침을 잡아주는 이유는 회귀분석 같은 전통적인 기법의 경우 데이터에 섞여있는 잡음의 분포를 정규분포같이 대칭인 분포로 가정하는 경우가 많기 때문이다. 
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+    ggplot(aes(x = sign(weekly_sales) * log(abs(weekly_sales) + 2))) +
+    geom_histogram() +
+    labs(title = "Transformed distribution of weekly sales 1",
+         x = "weekly_sales")
+```
+
+`log`를 취해주었을 경우 다음과 같이 치우침이 많이 잡히는 것을 알 수 있다. 하지만 위의 분포 역시 왼쪽으로 치우쳐 있는 것을 알 수 있다. 분포를 조금 더 종모양으로 만들어주기 위하여 제곱근을 이용했다. 아래를 보면 분포가 종모양처럼 예뻐진 것을 알 수 있다.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+    ggplot(aes(x = sign(weekly_sales) * (abs(weekly_sales))^(1/5))) +
+    geom_histogram() +
+    labs(title = "Transformed distribution of weekly sales 2",
+         x = "weekly_sales")
+```
+
+## NA analysis
+
+R에는 결측치 분석을 아주 용이하게 해주는 패키지가 하나 존재하는데, 바로 `naniar`라는 패키지 이다.
+
+```{r message=FALSE, warning=FALSE, class.source = 'fold-hide'}
+library(naniar)
+features %>% 
+  select_if(~sum(is.na(.)) > 0) %>% # 결측치 있는 칼럼 선택
+  gg_miss_var()
+```
+`gg_miss_var()`를 통하여 현재 mark_down1-5 변수, 그리고, unemploment와 cpi가 결측치가 존재하는 것을 확인하였다.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+features %>% 
+  select_if(~sum(is.na(.)) > 0) %>%
+  gg_miss_upset()
+```
+
+`gg_miss_upset()` 함수의 경우 결측치가 동시에 발생하는 변수들을 보여주는데, mark_down1-5까지가 동시에 없는 결측치의 경우 (첫번째 기둥) 2011년 11월 이전의 자료를 나타내는 것을 알 수 있다.
+
+# 전처리 레시피(`recipe`) 만들기
+
+tidymodels의 전처리 패키지지 recipe을 사용하여 전처리를 하도록하자.
+
+## `all_data` 합치기
+
+먼저 `store` 와 `features` 데이터에 있는 정보를 `train`과 `test` 데이터에 옮겨오자. 일단 결측치가 없는 변수들만 가져오고, 추후에 결측치가 있는 변수인 cpi와 unemployment, mark_down 변수들을 가져오자.
+
+```{r}
+all_data <- bind_rows(train, test)
+all_data <- left_join(all_data, stores, by = c("store"= "store"))
+all_data <- features %>% 
+    select(-c(starts_with("mark"), is_holiday)) %>% 
+    left_join(all_data, y = ., by = c("store"= "store",
+                                      "date" = "date"))
+
+group_mean <- read_csv("./group_mean.csv") %>% janitor::clean_names()
+all_data$group_mean <- group_mean$group_mean
+
+names(all_data)
+dim(all_data)
+```
+
+## `NA` cpi와 unemployment 변수
+
+`unemployment`과 `cpi`의 `NA` 값들의 경우, 결측치 값이 2013년 5, 6, 7월에 집중 되어 있는 것을 확인 할 수 있다.
+
+```{r}
+all_data %>% 
+    mutate(year = lubridate::year(date)) %>% 
+    mutate(month = lubridate::month(date)) %>% 
+    group_by(year, month) %>% 
+    summarise(count_na_cpi = sum(is.na(cpi)),
+              count_na_unemp = sum(is.na(unemployment))) %>% 
+    filter(count_na_cpi > 0 | count_na_unemp > 0)
+```
+
+## `cpi`와 `unemployment` 변수 `NA` 결측치 채우기
+
+`cpi`와 `unemployment`를 종속변수로 설정 후 년도, 월, 점포, 부서 변수를 이용해서 회귀분석을 이용하여 채우도록 한다.
+
+```{r}
+impute_var <- function(var, all_data, var_name){
+  var_train <- all_data %>% 
+    select({{var}}, date, store, dept) %>% 
+    filter(!is.na({{var}}))
+  var_test <- all_data %>% 
+    select({{var}}, date, store, dept) %>% 
+    filter(is.na({{var}}))
+  
+  var_rec <- recipe(as.formula(paste0(var_name, "~ .")), var_train) %>% 
+      step_mutate(store = as_factor(store),
+                  dept = as_factor(dept),
+                  year = lubridate::year(date),
+                  month = lubridate::month(date)) %>%
+      step_dummy(store, dept) %>% 
+      prep(training = var_train)
+  var_train2 <- juice(var_rec)
+  var_test2 <- bake(var_rec, var_test)
+  
+  lm_model <- 
+      linear_reg() %>%
+      set_engine("lm")
+  
+  lm_fit <- 
+      lm_model %>% 
+      fit(as.formula(paste0(var_name, "~ .")), data = var_train2)
+  
+  var_impute <- predict(lm_fit, var_test2)
+  var_impute$.pred
+}
+result_cpi <- impute_var(cpi, all_data, "cpi")
+result_ump <- impute_var(unemployment, all_data, "unemployment")
+all_data$cpi[is.na(all_data$cpi)] <- result_cpi
+all_data$unemployment[is.na(all_data$unemployment)] <- result_ump
+all_data %>% tail %>% kable()
+```
+
+```{r}
+all_data %>% 
+    summarise_all(~sum(is.na(.)))
+```
+
+## `NA` 와 markdown 1-5 변수
+
+```{r}
+mean_markdown <- features %>%
+    filter(date >= "2012-01-01" & date < "2013-01-01") %>% 
+    mutate(month = lubridate::month(date)) %>% 
+    group_by(store, month) %>% 
+    summarise(across(mark_down1:mark_down5, mean, na.rm = T))
+
+mean_markdown %>% 
+    summarise_all(~sum(is.na(.))) %>% 
+    colSums()
+
+markdown_features <- features %>% 
+    mutate(month = lubridate::month(date)) %>% 
+    left_join(y = mean_markdown, by = c("store"= "store",
+                                              "month" = "month")) %>% 
+    mutate(mark_down1 = if_else(is.na(mark_down1.x), mark_down1.y, mark_down1.x),
+           mark_down2 = if_else(is.na(mark_down1.x), mark_down2.y, mark_down2.x),
+           mark_down3 = if_else(is.na(mark_down1.x), mark_down3.y, mark_down3.x),
+           mark_down4 = if_else(is.na(mark_down1.x), mark_down4.y, mark_down4.x),
+           mark_down5 = if_else(is.na(mark_down1.x), mark_down5.y, mark_down5.x)) %>% 
+    select(store, date, mark_down1:mark_down5)
+
+all_data <- markdown_features %>% 
+    left_join(all_data, y = ., by = c("store"= "store",
+                                      "date" = "date"))
+
+options(max.print = 20)
+names(all_data)
+```
+
+## 공휴일 데이터 코딩
+
+미국의 휴일 정보를 가지고있는 `step_holiday` 함수를 이용해서 미국 공휴일을 모두 빼오도록 한다. 다음은 미국 공휴일 목록이다.
+
+```{r}
+timeDate::listHolidays("US")
+```
+
+```{r}
+library(lubridate)
+
+datedb <- data.frame(date = ymd("2010-1-1") + days(0:(365*4))) %>% 
+    filter(date > "2010-01-29" & date < "2013-07-27") %>% 
+    mutate(index = 0:(length(date)-1))
+datedb$date %>% range()
+all_data$date %>% range()
+
+holiday_rec <- recipe(~ date + index, datedb) %>% 
+    step_holiday(date,
+                 holidays = timeDate::listHolidays("US")) %>% 
+    step_mutate(index_mod = index %/% 7) %>% 
+    prep(training = datedb) %>% 
+    juice()
+
+holiday_rec %<>%
+    select(-date) %>% 
+    select(starts_with("date"), index_mod) %>% 
+    group_by(index_mod) %>% 
+    summarise_all(sum) %>% 
+    mutate(date = all_data$date %>% unique()) %>% 
+    select(date, dplyr::everything())
+
+all_data <- holiday_rec %>% 
+    select(-index_mod) %>% 
+    left_join(all_data, y = ., by = c("date" = "date"))
+all_data %>% head() %>%
+  kable()
+  
+# custom weights
+# weight <- c(1, 5)[as_factor(all_data$is_holiday)]
+```
+
+## 전처리 과정 기록하기
+
+tidymodel의 편리한 장점 중 하나는 다양한 전처리 함수를 제공해서 실제로 전처리 코딩을 하지 않아도 되도록 자동화 시켜놓은 것이다. 전처리를 하고자 하는 방법을 recipe에 적어주면, 나중에 한번에 전처리를 시켜준다.
+
+다음의 recipe에는 `date` 변수에서 날짜 정보를 빼오고, `temperature, fuel_price, cpi, unemployment` 변수들을 10차항까지 코딩해서 넣어주는 전처리 과정이 들어있다.
+
+```{r}
+walmart_recipe <- all_data %>% 
+    recipe(weekly_sales ~ .) %>%
+    step_mutate(year = lubridate::year(date)) %>%   
+    step_mutate(month = lubridate::month(date)) %>%
+    step_mutate(week = lubridate::week(date)) %>% 
+    step_rm(date, starts_with("mark"), starts_with("date")) %>%
+    # step_medianimpute(mark_down1, mark_down2, 
+    #                   mark_down3, mark_down4, mark_down5) %>% 
+    prep(training = all_data)
+
+print(walmart_recipe)
+```
+
+## 전처리 데이터 짜내기 (`juice`)
+
+저장된 `recipe`의 전처리를 한 데이터를 `juice` 함수로 짜내보자.
+
+```{r}
+all_data2 <- juice(walmart_recipe)
+all_data2 %>% dim()
+all_data2 %>% head() %>% 
+  kable()
+```
+
+# 모델 학습하기
+
+## 데이터 나누기
+
+```{r}
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+
+# train2_isholiday <- train2 %>% filter(is_holiday == TRUE)
+
+# 튜닝을 위한 validation 데이터 설정
+set.seed(2021)
+
+# validation_split <- vfold_cv(train2, v = 5)
+validation_split <- validation_split(train2, prop = 0.1, 
+                                     strata = weekly_sales)
+```
+
+## 튜닝 스펙 설정하기
+
+```{r}
+tune_spec <- rand_forest(mtry = tune(),
+                         min_n = tune(),
+                         trees = 1000) %>% 
+    set_engine("ranger") %>% 
+    set_mode("regression")
+
+param_grid <- grid_random(finalize(mtry(), x = train2[,-1]),
+                          min_n(),
+                          size = 10)
+```
+
+## 워크플로우 `workflow()` 설정
+
+```{r}
+workflow <- workflow() %>%
+  add_model(tune_spec) %>% 
+  add_formula(weekly_sales ~ .)
+```
+
+## Randomforest 튜닝하기
+
+```{r tunerf}
+library(doParallel)
+Cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(Cluster)
+
+library(tictoc)
+tic()
+tune_result <- workflow %>% 
+  tune_grid(validation_split,
+            grid = param_grid,
+            metrics = metric_set(mae))
+toc()
+```
+
+```{r}
+tune_result$.notes
+tune_result %>% 
+  collect_metrics()
+```
+
+## 튜닝 결과 시각화
+
+```{r message=FALSE}
+tune_result %>%
+  collect_metrics() %>%
+  filter(.metric == "mae") %>% 
+  ggplot(aes(mtry, mean, color = .metric)) +
+  geom_line(size = 1.5) +
+  scale_x_log10() +
+  theme(legend.position = "none") +
+  labs(title = "MAE")
+```
+
+```{r}
+tune_result %>% show_best(metric = "mae") %>% kable()
+```
+
+```{r}
+tune_best <- tune_result %>% select_best(metric = "mae")
+tune_best$mtry
+tune_best$min_n
+```
+
+# Elastic Net regeression 모델 설정 및 학습
+
+`mixture`와 `penalty` 모수를 튜닝 된 최적 모수로 학습시킨다.
+
+```{r trainrf, message=FALSE, warning=FALSE}
+cores <- parallel::detectCores() -1
+cores
+
+rf_model <- 
+  rand_forest(mtry = tune_best$mtry,
+              min_n = tune_best$min_n,
+              trees = 1000) %>% 
+    set_engine("ranger", seed = 2021, num.threads = cores) %>% 
+    set_mode("regression")
+
+tic()
+rf_fit <- 
+    rf_model %>% 
+    fit(weekly_sales ~ ., data = train2)
+toc()
+
+options(max.print = 10)
+rf_fit
+```
+
+# Prediction and submit (예측 및 평가)
+
+```{r warning=FALSE}
+# test2$group_mean[is.na(test2$group_mean)] <- 0
+result <- predict(rf_fit, test2)
+result %>% head()
+result
+```
+
+```{r}
+submission <- read_csv(file.path(file_path, "sampleSubmission.csv.zip"))
+submission$Weekly_Sales <- result$.pred
+write.csv(submission, row.names = FALSE,
+          "rf_with_groupmean_tuned.csv")
+submission %>% head()
+```
+
+
