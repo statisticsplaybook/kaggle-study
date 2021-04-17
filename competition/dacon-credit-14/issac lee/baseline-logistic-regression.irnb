@@ -1,0 +1,157 @@
+{
+    "cells": [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 슬기로운 통계생활 at DACON!\n",
+                "\n",
+                "안녕하세요~! 요즘 핫한 Tidymodels를 사용해서 월간 데이콘 14 - 신용카드 사용자 연체 예측 AI 경진대회 베이스라인을 잡아보고자 합니다. 😎\n",
+                "\n",
+                "# 준비작업\n",
+                "\n",
+                "### Library load\n",
+                "\n",
+                "이번 포스팅에서 사용할 R패키지들을 불러오자. 특히 요즘 핫하디 핫한 `tidymodels` 사용하여 월마트 대회를 가지고 놀아본다. 또한 마이 빼이보릿 연산자들을 사용하기 위하여 `magrittr`를 불러왔다.🤣\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "suppressMessages(library(tidymodels))\n",
+                "suppressMessages(library(tidyverse))\n",
+                "suppressMessages(library(magrittr))\n",
+                "suppressMessages(library(skimr))\n",
+                "suppressMessages(library(knitr))\n",
+                "theme_set(theme_bw())\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "### Dataset load\n",
+                "\n",
+                "이 대회에서 주어진 데이터셋을 불러보자. 주어진 파일 리스트는 다음과 같다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "file_path <- \"../input/daconcredit14/\"\n",
+                "files <- list.files(file_path)\n",
+                "files\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "각 변수의 이름을 `janitor` 패키지로 말끔하게 바꿔준다.\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "train <- read_csv(file.path(file_path, \"train.csv\")) %>% \n",
+                "  janitor::clean_names()\n",
+                "test <- read_csv(file.path(file_path, \"test.csv\")) %>% \n",
+                "  janitor::clean_names()\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 데이터 기본정보 확인\n",
+                "\n",
+                "## Basic info.\n",
+                "\n",
+                "이 대회는 기본적으로 간단한 대회이다. 첫번째 스터디용 대회로 선택을 한 이유이기도 하다. 주 데이터는 2만 6천개의 train 표본과 1만개의 test 표본들로 구성이 되어있다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "dim(train)\n",
+                "dim(test)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "각 데이터 셋의 변수명을 살펴보자. \n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "names(train)\n",
+                "names(test)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "먼저 `test` 데이터에는 우리가 예측하고 싶은 변수인 `credit` 변수가 들어있지 않은 것을 알 수 있다. \n",
+                "\n",
+                "데이터를 훑어보기 위해서 `skim()` 함수를 이용하자. 이 함수는 데이터에 들어있는 변수들을 타입 별로 분석해서 리포트를 작성해준다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "skim(train)\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "결과를 살펴보자. 먼저 결측치가 상대적으로 많이 없는 착한? 데이터이다. character 변수의 complete rate를 살펴보면 모든 변수가 1이고, `occyp_type` 변수만이 결측치가 8171개가 존재하는 것을 알 수 있다. 또한 고맙게도 numeric 변수의 결측치는 하나도 없다! 😆\n",
+                "\n"
+            ]
+        }
+    ],
+    "metadata": {
+        "anaconda-cloud": "",
+        "kernelspec": {
+            "display_name": "R",
+            "langauge": "R",
+            "name": "ir"
+        },
+        "language_info": {
+            "codemirror_mode": "r",
+            "file_extension": ".r",
+            "mimetype": "text/x-r-source",
+            "name": "R",
+            "pygments_lexer": "r",
+            "version": "3.4.1"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 1
+}
