@@ -1,0 +1,305 @@
+---
+title: "walmart EDA 2_April"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.align = "center")
+```
+
+
+##Data Preparation
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(lubridate)
+library(skimr)
+library(magrittr)
+library("data.table")
+
+
+train <- read_csv("D:/user/Documents/R projects/kaggle-study/data/walmart/train.csv.zip") %>% janitor::clean_names()
+test <- read_csv("D:/user/Documents/R projects/kaggle-study/data/walmart/test.csv.zip") %>% janitor::clean_names()
+features <- read_csv("D:/user/Documents/R projects/kaggle-study/data/walmart/features.csv.zip") %>% janitor::clean_names()
+stores <- read_csv("D:/user/Documents/R projects/kaggle-study/data/walmart/stores.csv")%>% janitor::clean_names()
+
+```
+
+
+##Data Overview: EDA
+
+```{r setup, include=FALSE}
+dim(train)
+dim(test)
+dim(features)
+dim(stores)
+
+names(train)
+names(test)
+names(features)
+names(stores)
+
+```
+####predict하고자 하는 데이터 weekly_sales 살펴보기
+
+weekly_sales데이터 먼저 살펴보기
+
+```{r setup, include=FALSE}
+train %>% ggplot(aes(x=weekly_sales))+geom_histogram()
+
+```
+
+
+log로 다시 시각화해서 살펴보기. 데이터 간의 편차, skewness와 kurtosis를 줄여, 정규성을 높이고 분석에서 정확한 값을 얻을 수 있음. 
+Briggs logarithm / Natural logarithm 
+
+```{r setup, include=FALSE}
+train %>% ggplot(aes(x=sign(weekly_sales)*log(abs(weekly_sales)+2)))+geom_histogram()
+
+```
+
+
+
+####feature로 사용할 데이터 살펴보기 위해 data explorating
+
+EDA를 편하게 하기 위해서 4개의 데이터 셋을 하나로 통합시켜 보기
+
+
+```{r setup, include=FALSE}
+train_test <- bind_rows(train,test)
+dim(train_test)
+```
+```{r setup, include=FALSE}
+fea_sto <- left_join(features,stores,by="store")
+dim(fea_sto)
+```
+```{r setup, include=FALSE}
+alldata <- left_join(train_test,fea_sto,by=c("store"= "store",
+                                             "date"="date",
+                                             "is_holiday"="is_holiday"))
+
+alldata %>% mutate(year=year(date),
+                   month=month(date),
+                   week=week(date)) ->alldata
+
+
+alldata %>% skim()
+```
+
+
+
+####1) holiday
+
+공휴일이 있는 주의 sales데이터를 살펴보기 위해, ggplot으로 데이터 시각화.
+
+```{r setup, include=FALSE}
+alldata %>% group_by(year,week) %>% 
+    summarise(weekly_sales = mean(weekly_sales,na.rm=TRUE)) %>%
+    ggplot()+
+    geom_line(aes(x=week, y=weekly_sales, color=factor(year)))+
+    scale_x_continuous(breaks = 1:53)
+
+```
+
+내려받은 데이터셋에서 공휴일이 있는 week를 plot위에 표시해보기
+holiday==TRUE값만 추출하여, 몇 번째 week가 공휴일로 표시되어있는지 확인한 후, 이 week를 plot위에 표시
+
+```{r setup, include=FALSE}
+alldata %>% filter(is_holiday==TRUE) %>%
+    select(year,week, weekly_sales, is_holiday) %>%
+    group_by(year,week) %>%
+    summarise(weekly_sales = mean(weekly_sales))
+
+```
+
+2010년과 2011년에 7,37,48,53week, 2012년에 6,36, 47, 52week, 2013년엔 6week가 공휴일이기 때문에 시각화한 plot위에 holiday week표시
+
+
+```{r setup, include=FALSE}
+alldata %>% group_by(year,week) %>% 
+    summarise(weekly_sales = mean(weekly_sales,na.rm=TRUE)) %>%
+    ggplot()+
+    geom_line(aes(x=week, y=weekly_sales, color=factor(year)))+
+    scale_x_continuous(breaks = 1:53)+
+    geom_vline(xintercept = c(7,37,48,53,6,36,47,52), 
+               color="pink", size=.5)
+
+```
+
+
+holiday로 표시되어 있지 않지만, 매출이 높은 지점 around w13~w17 발견되었으므로, 포함되지 않은 공휴일:Easter day 추가해주기 
+
+
+```{r setup, include=FALSE}
+alldata %>% mutate(holiday_add = case_when(
+    year=="2010"&week==14 ~ 1,
+    year=="2011"&week==17 ~ 1,
+    year=="2012"&week==14 ~ 1,
+    year=="2013"&week==13 ~ 1,
+    is_holiday==TRUE ~ 1,
+    T ~ 0
+)) -> alldata
+alldata %>% head
+```
+
+
+
+
+**holiday와 markdown의 상관관계
+공휴일에 다양한 프로모션을 한 듯 함. 공휴일과 markdown의 상관관계는 높지만, 이것이 실제 weekly_sales와의 상관관계는 없음. 즉, 공휴일에 다양한 프로모션을 했지만 실제로 세일즈에 영향을 주지는 않은 것으로 보임. 
+
+```{r setup, include=FALSE}
+library(corrplot)
+
+alldata[1:421570,] %>% select(mark_down1,
+                              mark_down2,
+                              mark_down3,
+                              mark_down4,
+                              mark_down5,
+                              is_holiday,
+                              weekly_sales) ->M
+M<- na.omit(M)
+
+cor(M, method = "pearson") ->M
+corrplot(M, method = "number", type="lower")
+```
+
+
+
+
+```{r setup, include=FALSE}
+alldata %>% group_by(year,week) %>% 
+    summarise(weekly_sales = mean(weekly_sales,na.rm=TRUE)) %>%
+    ggplot()+
+    geom_line(aes(x=week, y=weekly_sales))+
+    scale_x_continuous(breaks = 1:53)+
+    geom_point()
+
+```
+
+
+####2) holiday
+
+```{r setup, include=FALSE}
+
+    
+
+```
+
+
+
+### Modelling 
+
+#### create recipe
+```{r setup, include=FALSE}
+
+alldata %>% select(-c(starts_with("mark"), cpi, unemployment)) -> final_data
+
+walmart_recipe <- recipe(weekly_sales~. , data=final_data) %>%
+    step_normalize(all_numeric(),  -all_outcomes())
+
+walmart_recipe <- prep(walmart_recipe, training = final_data)
+
+
+
+print(walmart_recipe)
+
+```
+
+
+
+#### Juice() : see what the pre-processed data looks like with the juice() function
+
+
+
+```{r setup, include=FALSE}
+final_data <- juice(walmart_recipe)
+final_data %>% head() %>% dim()
+
+```
+
+
+#### 모델 학습하기
+
+#### split data
+
+
+```{r setup, include=FALSE}
+train_index <- seq_len(nrow(train))
+train2 <- final_data[train_index,]
+test2 <- final_data[-train_index,]
+
+```
+
+
+
+#### workflow
+
+
+```{r setup, include=FALSE}
+set.seed(2021)
+
+validation_split <- vfold_cv(train2, v=10,
+                             strata = weekly_sales)
+
+tune_spec <- linear_reg(penalty=tune(), mixture=0) %>%
+    set_engine("glmnet")
+
+
+
+workflow <- workflow() %>%
+    add_model(tune_spec) %>%
+    add_formula(weekly_sales~.)
+```
+
+
+
+
+
+#### fit model
+
+```{r setup, include=FALSE}
+lm_model <- linear_reg() %>%
+    set_engine("lm")
+
+lm_form_fit <- lm_model %>%
+    fit(weekly_sales~., data=train2)
+
+names(lm_form_fit)
+
+
+
+```
+
+
+
+
+#### feature importance plot 그리기
+```{r setup, include=FALSE}
+library(vip)
+library(workflows)
+
+wf <- finalize_workflow(workflow, tune_spec)
+wf
+
+
+wf %>% pull_workflow_fit(workflow)$fit
+
+
+```
