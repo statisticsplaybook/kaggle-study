@@ -1,0 +1,259 @@
+---
+title: "4/24 sunpower"
+author: "류성균"
+date: '2021 4 21 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 대회 개요
+- 시간대별 태양광 발전량 예측
+- 평가 지표 : NMAE-10(Normalized Mean Absolute Error)
+    - 4개의 발전소 반전량을하나로 합하여 평가
+    - 4개 발전소 총 발전용량으로 정규화
+    - 발전용량의 10% 이상 발전된 데이터만으로 평가
+    
+    - publci LB : 2021년 2월 예측
+    - private LB : 2021년 6월 9일 ~ 2021년 7월 8일 30일간 예측, 평가기간 제출 가능, 예측 전날 선택된 제출물 평가
+
+
+$$\begin{matrix}
+nMAE &=& \frac{\frac{1}{n} \Sigma \left| f_t - a_t \right| }{ \frac{1}{n}\Sigma a_t} \\
+&=& \frac{ \Sigma \left| f_t - a_t \right| }{ \Sigma a_t}
+\end{matrix}$$
+
+```{r}
+library(needs)
+# 파일 읽기
+needs(here)
+needs(data.table)
+
+# 전처리
+needs(tidyverse)
+needs(magrittr)
+needs(skimr)
+needs(lubridate)
+
+# 모델링
+needs(tidymodels)
+needs(fpp2)
+```
+
+# 대회 : 동서발전 태양광 발전량 예측 AI 경진대회
+```{r}
+here()
+```
+```{r}
+(file_list = list.files(path = here('competition/dacon_solar_power')))
+```
+
+```{r}
+## data read
+dangjin_fcst = fread(here("competition/dacon_solar_power", file_list[1]))
+dangjin_obs = fread(here("competition/dacon_solar_power", file_list[2])
+                    , encoding = "UTF-8")
+energy = fread(here("competition/dacon_solar_power", file_list[3]))
+sample_submision = fread(here("competition/dacon_solar_power", file_list[4]))
+site_info = fread(here("competition/dacon_solar_power", file_list[5])
+                  , encoding = "UTF-8")
+ulsan_fcst = fread(here("competition/dacon_solar_power", file_list[6]))
+ulsan_obs = fread(here("competition/dacon_solar_power", file_list[7])
+                  , encoding = "UTF-8")
+```
+
+- site_info.csv - 발전소 정보
+    - Id : 사이트 식별자
+    - Capacity : 발전소 발전용량(MW)
+    - Address : 주소
+    - InstallationAngle : 설치각(º)
+    - IncidentAngle : 입사각(º)
+    - Latitude : 위도
+    - Longitude : 경도
+
+```{r}
+# 당진이냐 울산이냐는 변수로 사용 가능
+site_info %>% head()
+```
+
+```{r}
+site_info %>% skim()
+```
+
+- energy.csv - 발전소별 발전량
+    - time : 1시간 단위 계량된 시간 (ex-2018-03-01 1:00:00 => 2018-03-01 00:00:00 ~                                      2018-03-01 1:00:00 1시간동안 발전량 계량)
+    - dangjin_floating : 당진수상태양광 발전량(KW)
+    - dangjin_warehouse : 당진자재창고태양광 발전량(KW)
+    - dangjin : 당진태양광 발전량(KW)
+    - ulsan : 울산태양광 발전량(KW)
+
+```{r}
+energy %>% head()
+```
+```{r}
+energy %>% tail()
+```
+
+
+```{r}
+energy %>% skim()
+```
+
+
+- dangjin_fcst_data.csv - 당진지역 발전소 동네 예보
+    - Forecast time : 예보 발표 시점('forecast'시간 후 기상 예보)
+    - forecast : 예보 시간 (ex - Forecast time:2018-03-01 11:00:00, forecast:4.0 =>                             2018-03-01 11:00:00에 발표한 2018-03-01 15:00:00 예보
+    - 예보 발표 시점 'forecast'시간 후 기상 예보
+        - Temperature : 온도(℃)
+        - Humidity : 습도(%)
+        - WindSpeed : 풍속(m/s)
+        - WindDirection : 풍향(º)
+        - Cloud : 하늘상태(1-맑음, 2-구름보통, 3-구름많음, 4-흐림)
+    
+    
+```{r}
+dangjin_fcst %>% head()
+```
+
+```{r}
+dangjin_fcst %>% skimr::skim()
+```
+
+- dangjin_obs_data.csv - 당진지역 발전소 인근 기상 관측 자료
+    - 지점 : 지점 코드
+    - 지점명 : 관측소 지점
+    - 일시 : 관측 시간
+    - 기온(°C) : 기온(°C)
+    - 풍속(m/s) : 풍속(m/s)
+    - 풍향(16방위) : 풍향(º)
+    - 습도(%) : 습도(%)
+    - 전운량(10분위) : 전운량(낮을 수록 구름이 적음)
+    
+```{r}
+dangjin_obs %>% head()
+```
+
+```{r}
+# 결측 존재
+dangjin_obs %>% skim()
+```
+
+- ulsan_fcst_data.csv - 울산지역 발전소 동네 예보
+    - Forecast time : 예보 발표 시점
+    - forecast : 예보 시간 (ex - Forecast time:2018-03-01 11:00:00, forecast:4.0 =>                             2018-03-01 11:00:00에 발표한 2018-03-01 15:00:00 예보
+    - 예보 발표 시점 'forecast'시간 후 기상 예보
+        - Temperature : 온도(℃)
+        - Humidity : 습도(%)
+        - WindSpeed : 풍속(m/s)
+        - WindDirection : 풍향(º)
+        - Cloud : 하늘상태(1-맑음, 2-구름보통, 3-구름많음, 4-흐림)
+        
+```{r}
+ulsan_fcst %>% head()
+```
+
+```{r}
+ulsan_fcst %>% skim()
+```
+- ulsan_obs_data.csv - 울산지역 발전소 인근 기상 관측 자료
+    - 지점 : 지점 코드
+    - 지점명 : 관측소 지점
+    - 일시 : 관측 시간
+    - 기온(°C) : 기온(°C)
+    - 풍속(m/s) : 풍속(m/s)
+    - 풍향(16방위) : 풍향(º)
+    - 습도(%) : 습도(%)
+    - 전운량(10분위) : 전운량(낮을 수록 구름이 적음)
+    
+```{r}
+ulsan_obs %>% head()
+```
+```{r}
+# 결측 존재
+ulsan_obs %>% skim()
+```
+
+- sample_submission.csv - 예측한 발전량 제출 양식
+```{r}
+sample_submision %>% head()
+```
+
+## EDA - energy
+```{r}
+energy %>% 
+    pivot_longer(!time, names_to = 'site', values_to = 'power') %>%
+    ggplot(aes(x= time, y = power, group = site, color = site)) + geom_line() + 
+    theme(
+        #axis.title.x=element_blank(), 
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank()
+        )
+    
+```
+
+```{r}
+energy  %>% 
+    mutate(time = ymd_hms(energy$time)) %>%
+     pivot_longer(!time, names_to = 'site', values_to = 'power') %>%
+    filter(
+        (site == 'dangjin_floating' & power >= 100) |
+        (site == 'dangjin_warehouse' & power >= 70) |
+        (site == 'dangjin' & power >= 100) |
+        (site == 'ulsan' & power >= 50)) %>% 
+    mutate(
+    year = year(time),
+    month = month(time),
+    week = week(time),
+    day = day(time),
+    hour = hour(time),
+    am = am(time)
+) -> energy_data
+```
+
+
+```{r}
+energy  %>% 
+    mutate(time = ymd_hms(energy$time)) %>%
+     pivot_longer(!time, names_to = 'site', values_to = 'power') %>% 
+    group_by(site) %>% count()# 1068*24일
+```
+
+```{r}
+energy_data %>% group_by(site) %>% count()
+```
+
+- 당진은 8~19시까지 발전이 이뤄지고, 울산은 8~18시까지 capacity의 10% 발전이 이뤄짐.
+
+```{r}
+energy_data %>% group_by(site, hour) %>% count() %>% 
+    ggplot(aes(x = hour, y = n, colour = site)) + 
+    geom_line()
+
+```
+```{r}
+energy_data %>% group_by(site) %>% summarize(min = min(hour), 
+                                             max = max(hour))
+```
+
+
+
+```{r}
+energy %>% 
+    # 예측 대상이 되는 값만 확인
+    filter(
+        (site == 'dangjin_floating' & power >= 100) |
+        (site == 'dangjin_warehouse' & power >= 70) |
+            (site == 'dangjin' & power >= 100) |
+            (site == 'ulsan' & power >= 50) 
+    ) %>% 
+    ggplot(aes(x = month, y = power, fill = site)) + 
+    geom_boxplot() + 
+    facet_wrap(~site)
+```
+
+```{r}
+
+```
+
