@@ -219,8 +219,193 @@ alldata$occyp_type %>% skim()
 
 
 
+```{r}
+
+#occyp_type 나머지 NA값들의 income_type은 뭘지 궁금해서 
+
+alldata %>% filter(is.na(occyp_type)) %>%
+    select(income_type, edu_type, year_employed, days_birth_year, work_phone)
 
 
+alldata %>% filter(is.na(occyp_type)) %>%
+    select(income_type) %>%
+    ggplot()+
+    geom_bar(aes(x=income_type))
+
+
+alldata %>%  
+    select(c(occyp_type, income_type)) %>% # 직업타입별, 신용도 살펴보기
+    ggplot(aes(x=occyp_type,  fill=income_type))+
+    geom_bar(position=position_dodge(0.7))+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    theme(axis.text.x = element_text(angle=90, hjust=1))
+
+
+alldata %>% filter(income_type=="Student") %>% select(income_type, occyp_type, credit)
+# alldata$occyp_type <- ifelse((alldata$income_type=="Student") & (alldata$occyp_type==NA, 
+#                              alldata$occyp_type=="Core staff", 
+#                              alldata$occyp_type)
+
+
+alldata %>% filter(income_type=="Student")
+
+
+```
+
+
+income_type별 평균 수입
+
+```{r}
+
+alldata %>% select(income_type, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=income_type, fill=as.factor(credit)),position=position_dodge())+
+    theme_bw()
+
+
+alldata %>% filter(income_type=="Student")
+
+
+
+alldata %>% select(income_type, income_total) %>%
+    group_by(income_type) %>% summarise(income_total=mean(income_total)) 
+
+
+alldata %>% filter(!is.na(income_type)&!is.na(credit)) %>% 
+    select(c(income_type, credit)) %>%
+    ggplot(aes(x=income_type,  fill=as.factor(credit)))+
+    geom_bar(position="fill")+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    theme(axis.text.x = element_text(angle=90, hjust=1))+
+    geom_text(data=. %>%
+                  group_by(income_type, credit) %>%
+                  tally() %>%
+                  mutate(p=n/sum(n)) %>%
+                  ungroup(),
+              aes(y=p, label=scales::percent(round((p),1))),
+              position=position_stack(vjust = 0.003),
+              show.legend=FALSE)
+
+
+```
+
+
+
+6) car, reality, income_total 
+
+자산이 많을수록 신용도가 좋을지 살펴보고 싶어서, column을 만들어보기
+연간소득이 0인 자료는 없음.
+
+
+
+```{r}
+
+alldata$income_total %>% summary()
+
+alldata %>% filter(income_total == 0)
+alldata %>% filter(income_total < 0)
+
+#reality type에 오류가 있는지 한 번 확인. 
+#house_type rent인데, reality yes인 사람이 있을까
+
+alldata %>% filter(house_type=="Rented apartment"& reality == "Y")
+
+
+```
+
+
+asset grade
+차가 있고, 부동산이 있고, 소득이 있는 사람 = 0,
+차가 없고, 부동산이 있고, 소득이 있는 사람 = 1,
+차가 있고, 부동산이 없고, 소득이 있는 사람 = 2,
+차가 없고, 부동산이 없고, 소득만 있는 사람 = 3
+
+
+```{r}
+
+
+alldata %>% mutate(asset_grade= case_when(
+    car=="Y" & reality =="Y" ~ 0,
+    car=="N" & reality =="Y" ~ 1,
+    car=="Y" & reality =="N" ~ 2,
+    car=="N" & reality =="N" ~ 3
+)) ->alldata
+
+
+alldata %>% select(asset_grade, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=asset_grade, fill=as.factor(credit)), position = position_dodge())+
+    theme_bw()
+
+
+alldata %>% filter(!is.na(credit)) %>% 
+    select(c(asset_grade, credit)) %>%
+    ggplot(aes(x=asset_grade,  fill=as.factor(credit)))+
+    geom_bar(position="fill")+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    geom_text(data=. %>%
+                  group_by(asset_grade, credit) %>%
+                  tally() %>%
+                  mutate(p=n/sum(n)) %>%
+                  ungroup(),
+              aes(y=p, label=scales::percent(round((p),1))),
+              position=position_stack(vjust = 0.003),
+              show.legend=FALSE)
+
+
+
+
+```
+
+
+```{r}
+
+alldata %>% select(house_type, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=house_type, fill = as.factor(credit)), position=position_dodge())
+
+
+```
+
+
+```{r}
+
+alldata %>% filter(house_type=="Rented apartment")
+
+alldata %>% filter(house_type=="Co-op apartment")
+
+alldata %>% select(house_type, reality) %>%
+    group_by(house_type, reality) %>% summarise(n=n()) ->p
+
+
+p %>% ggplot()+
+    geom_bar(aes(x=house_type,fill=reality, y=n),
+             stat = 'identity', 
+             position = position_dodge())+theme_bw()
+
+```
+
+With_parents, Municipal apartment, Office apartment의 경우는 부동산을 소유하고 있지 않은 사람의 비중이 좀 더 많다는 것을 알 수 있다.  
+
+
+
+7) begin_month
+
+```{r}
+
+
+alldata %>% filter(!is.na(credit)) %>%
+    ggplot()+
+    geom_bar(aes(x=begin_month))+
+    facet_grid(.~credit)
+    
+
+
+
+```
 
 
 
@@ -230,6 +415,10 @@ alldata$occyp_type %>% skim()
 
 1) 기본적으로 credit 간의 sample 수 차이가 심하다 -> 종헌님: upsampling
 2) 직업타입(occyp_type)별로 credit 분포의 차이가 뚜렷한 직군이 몇 개 있다.
+
+
+
+
 
 
 
@@ -248,42 +437,64 @@ library(recipes)
 
 ```{r}
 
-sort(table(train$credit, useNA="always"))
-
-alldata<- bind_rows(train, test)
-alldata %>%dim()
+# sort(table(train$credit, useNA="always"))
+# 
 
 
-alldata_rec <- train %>% recipe(credit~., ) %>%
+train_index <- seq_len(nrow(train))
+train2 <- alldata[train_index,]
+test2 <- alldata[-train_index,]
+
+names(train2)
+
+# train2 <- train2 %>% select(-c(index, flag_mobil, work_phone, phone, email, year_employed))
+# test2 <- test2 %>% select(-c(index, flag_mobil, work_phone, phone, email, year_employed))
+
+
+
+train2_rec <- train2 %>% recipe(credit~., ) %>%
     step_mutate(credit=as.factor(credit)) %>%
-    step_rm(index, days_birth_year) %>%
+    step_rm(index, days_birth_year, income_type) %>%
     step_unknown(occyp_type) %>%
     step_integer(all_nominal(), -all_outcomes()) %>%
     step_center(all_predictors(), -all_outcomes()) %>%
-    prep(training=alldata)
+    prep(training=train2)
 
 # 
 #     step_upsample(credit, over_ratio = 0.5) %>%
 
 
-alldata_rec
+train2_rec
 
 
 ```
+
+
+
+
+
+
 ```{r}
 
+# 
+# table(bake(alldata_rec, new_data=NULL)$credit, useNA="always")
+# 
 
-table(bake(alldata_rec, new_data=NULL)$credit, useNA="always")
+train2_juice <- juice(train2_rec)
+test2_bake <- bake(train2_rec, new_data=test2)
 
 
-alldata_juice <- juice(alldata_rec)
-alldata_juice %>% head()
+train2_juice %>% head()
+test2_bake %>% head()
+
+
+
 
 # baked_train <- bake(train_rec, new_data=train)
 # table(baked_train$credit, useNA="always")
 
 
-alldata_juice %>% map_df(~sum(is.na(.))) %>%
+train2_juice %>% map_df(~sum(is.na(.))) %>%
     pivot_longer(cols=everything(),
                  names_to="variable",
                  values_to="na_count") %>%
@@ -309,6 +520,10 @@ tune_spec <- rand_forest(mtry = tune(),
 param_grid <- tibble(mtry = 3, min_n = 5)
 
 ```
+
+
+
+
 ```{r}
 workflow <-workflow() %>%
     add_model(tune_spec) %>%
@@ -319,14 +534,7 @@ workflow
 ```
 
 
-```{r}
-train_index <- seq_len(nrow(train))
-train2 <- alldata_juice[train_index,]
-test2 <- alldata_juice[-train_index,]
 
-skim(alldata_juice)
-
-```
 
 
 
@@ -334,7 +542,7 @@ skim(alldata_juice)
 library(tictoc)
 
 set.seed(123)
-validation_split <- validation_split(train2, 
+validation_split <- validation_split(train2_juice,
                                      prop = 0.7,
                                      strata = credit)
 
@@ -375,7 +583,7 @@ rf_model <- rand_forest(mtry = tune_best$mtry,
                         min_n=tune_best$min_n,
                         trees=300) %>%
     set_engine("ranger", seed=123,
-               num.threads=cores) %>%
+               num.threads=cores,importance='impurity') %>%
     set_mode("classification")
 
 
@@ -389,7 +597,7 @@ rf_model <- rand_forest(mtry = tune_best$mtry,
 ```{r}
 tictoc::tic()
 rf_fit <- rf_model %>%
-    fit(credit~., data=train2)
+    fit(credit~., data=train2_juice)
 tictoc::toc()
 
 options(max.print=10)
@@ -423,7 +631,7 @@ rf_fit
 
 ```{r}
 
-result <- predict(rf_fit, test2, type="prob")
+result <- predict(rf_fit, test2_bake, type="prob")
 result %>% head()
 
 
@@ -434,7 +642,7 @@ result %>% head()
 
 
 ```{r}
-submission <- read_csv("open/sample_submission.csv")
+submission <- read_csv("dataset/sample_submission.csv")
 sub_col <- names(submission)
 
 
@@ -442,13 +650,25 @@ submission <- bind_cols(submission$index, result)
 
 names(submission) <- sub_col
 write.csv(submission, row.names=FALSE,
-          "baseline_credit_Issac.csv")
+          "baseline_credit_drop(income_type)_4.csv")
 
 
 ```
 
 
+```{r}
+names(rf_fit)
 
+
+names(rf_fit$modelInfo)
+
+
+VarImp(rf_model)
+
+variable.names(rf_fit)
+
+
+```
 
 
 
