@@ -1,4 +1,4 @@
----
+ㅈ---
 title: "20210306 tidymodel tutorial with walmart"
 author: "류성균"
 date: '2021 3 6 '
@@ -34,8 +34,8 @@ here()
 
 ## Walmart mothership Data
 ```{r}
-train <- read_csv(here("data/walmart/train.csv.zip"))
-test <- read_csv(here("data/walmart/test.csv.zip"))
+train <- read_csv(here("competition/walmart/train.csv.zip"))
+test <- read_csv(here("competition/walmart/test.csv.zip"))
 ```
 
 
