@@ -1,0 +1,331 @@
+---
+title: "Baseline model with Tidymodels"
+author: "슬기로운통계생활"
+date: "4/6/2021"
+output: html_document
+---
+
+# 슬기로운 통계생활 at DACON!
+
+안녕하세요~! 요즘 핫한 Tidymodels를 사용해서 월간 데이콘 14 - 신용카드 사용자 연체 예측 AI 경진대회 베이스라인을 잡아보자. 😎
+
+# 준비작업
+
+## 패키지 불러오기
+
+이번 포스팅에서 사용할 R패키지들을 불러오자. 특히 요즘 핫하디 핫한 `tidymodels` 사용하여 월마트 대회를 가지고 놀아본다. 또한 마이 빼이보릿 연산자들을 사용하기 위하여 `magrittr`를 불러왔다.🤣
+
+```{r}
+suppressMessages(library(tidymodels))
+suppressMessages(library(tidyverse))
+suppressMessages(library(data.table))
+suppressMessages(library(treesnip))
+suppressMessages(library(magrittr))
+suppressMessages(library(skimr))
+suppressMessages(library(knitr))
+theme_set(theme_bw())
+```
+
+## 데이터셋 불러오기
+
+이 대회에서 주어진 데이터셋을 불러보자. 주어진 파일 리스트는 다음과 같다.
+
+```{r}
+file_path <- "../input/daconcredit14/"
+files <- list.files(file_path)
+files
+```
+각 변수의 이름을 `janitor` 패키지로 말끔하게 바꿔준다.
+
+```{r}
+train <- read_csv(file.path(file_path, "train.csv")) %T>% 
+  suppressMessages() %>% 
+  janitor::clean_names()
+test <- read_csv(file.path(file_path, "test.csv")) %T>%
+  suppressMessages() %>% 
+  janitor::clean_names()
+```
+
+
+# 데이터 기본정보 확인
+
+```{r}
+train %>% 
+  head() %>% 
+  kable() %>% 
+  kableExtra::kable_styling("striped") %>% 
+  kableExtra::scroll_box(width = "100%")
+```
+
+## 기본 정보
+
+이 대회는 기본적으로 간단한 대회이다. 첫번째 스터디용 대회로 선택을 한 이유이기도 하다. 주 데이터는 2만 6천개의 train 표본과 1만개의 test 표본들로 구성이 되어있다.
+
+```{r}
+dim(train)
+```
+
+```{r}
+dim(test)
+```
+
+각 데이터 셋의 변수명을 살펴보자. 
+
+```{r}
+names(train)
+```
+
+```{r}
+names(test)
+```
+
+먼저 `test` 데이터에는 우리가 예측하고 싶은 변수인 `credit` 변수가 들어있지 않은 것을 알 수 있다. 
+
+데이터를 훑어보기 위해서 `skim()` 함수를 이용하자. 이 함수는 데이터에 들어있는 변수들을 타입 별로 분석해서 리포트를 작성해준다.
+
+```{r}
+skim(train)
+```
+
+결과를 살펴보자. 먼저 결측치가 상대적으로 많이 없는 착한? 데이터이다. character 변수의 complete rate를 살펴보면 모든 변수가 1이고, `occyp_type` 변수만이 결측치가 8171개가 존재하는 것을 알 수 있다. 또한 고맙게도 numeric 변수의 결측치는 하나도 없다!😆
+
+같은 함수를 사용해서 `test` 셋을 보면 똑같은 패턴을 가지고 있는 것을 알 수 있다.
+
+```{r}
+skim(test)
+```
+
+# 시각화
+
+베이스 라인을 잡은 문서이니 간단하게 시각화 하나만 하고 넘어가자. (코드를 응용해서 다른 변수에 대한 상관 관계를 볼 수 있을 것이다.)
+
+```{r}
+train %>%
+  ggplot(aes(x = factor(credit), y = income_total)) +
+  geom_boxplot() +
+  facet_grid(. ~ income_type)
+```
+
+목표 변수인 credit이 Commercial associate 인 경우 수입이 증가할 수록 2번째 클래스에 속하는 것을 볼 때, 0에서 2로 옮겨갈 수 록 신용도가 높은 클래스라는 것을 예측해 볼 수 있다.
+
+학생 클래스의 경우 train 데이터에 셋이 많이 없다는 것을 알 수 있다. 추후에 다른 클래스로 통합을 시키는 것이 좋을 것이다.
+
+## 상관관계
+
+신용 등급 숫자가 높을 경우 신용이 더 좋아진다는 앞에서의 가정하에 상관계수를 구해보면 다음과 같다. 
+
+```{r}
+options(max.print = 50)
+train %>% 
+  select_if(is.numeric) %>% 
+  drop_na() %>% 
+  cor() %>% as.data.frame() %>% 
+  rownames_to_column(var = "variables") %>% 
+  select(variables, credit) %>% 
+  arrange(desc(abs(credit))) %>% kable()
+```
+
+생각보다 크게 나오지는 않지만, 그래도 가입기간과 나이가 신용도에 영향을 미치는 것 같다고 생각된다. 다만, 두 변수와 신용도의 관계를 양의 상관관계로 바꾸기 위해서 전처리 과정에서 부호를 없애주었다.
+
+```{r}
+train %>% ggplot(aes(x = -(days_birth/356))) +
+  geom_histogram() +
+  labs(x = "yrs")
+```
+
+# 전처리 하기
+
+`tidymodels`에서는 전처리를 할 때 `recipe` 라는 패키지를 사용한다. 이 패키지에는 전처리를 하는 방법을 음식 레피시 처럼 적어놓는다고 생각하면 쉽다.
+
+## all_data 묶기
+
+앞으로 전처리를 할 때 좀 더 편리하게 하기 위해서 `all_data`로 묶어내도록 하자.
+
+```{r}
+all_data <- bind_rows(train, test)
+all_data %>% dim()
+```
+
+## factor 변수로 바꿔주기
+
+결과값인 credit 변수와 character 타입의 변수들을 factor 변수로 바꿔주자.
+
+```{r}
+all_data %<>%
+  mutate_if(is.character, as.factor) %>% 
+  mutate(credit = factor(credit))
+
+all_data
+```
+
+## `recipe`를 통한 전처리 입력
+
+```{r}
+credit_recipe <- all_data %>% 
+  recipe(credit ~ .) %>% 
+  step_mutate(yrs_birth = -ceiling(days_birth/365),
+              yrs_employed = -ceiling(days_employed/356)) %>% 
+  step_rm(index, days_birth, days_employed) %>%
+  step_unknown(occyp_type) %>% 
+  step_integer(all_nominal(), -all_outcomes()) %>% 
+  step_center(all_predictors(), -all_outcomes()) %>% 
+  prep(training = all_data)
+
+print(credit_recipe)
+```
+
+## `juice`를 통한 전처리 즙짜기
+
+`juice()` 함수를 통해서 recipe에 입력된 전처리를 짜낸 데이터를 얻어온다.
+
+```{r}
+all_data2 <- juice(credit_recipe)
+head(all_data2)
+```
+
+다음과 같이 결측치 없이 잘 코딩된 데이터를 얻었다는 것을 확인 할 수 있다.
+
+```{r}
+all_data2 %>%
+map_df(~sum(is.na(.))) %>%
+  pivot_longer(cols = everything(),
+       names_to = "variable",
+       values_to = "na_count") %>% 
+  filter(na_count > 0)
+```
+
+전처리가 끝났으므로, train과 test셋을 나눈다.
+
+```{r}
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+```
+
+# 튜닝 준비하기
+
+`validation_split()` 함수를 사용하여 평가셋을 분리한다. 한 단계 더 나아간 cross validation은 `vfold_cv()`함수에서 제공하니 찾아보도록 하자.
+
+```{r}
+set.seed(2021)
+
+validation_split <- validation_split(train2, prop = 0.7,
+                                     strata = credit)
+```
+
+## 튜닝 스펙 설정
+
+```{r}
+tune_spec <- boost_tree(
+    trees = 1000, 
+    tree_depth = 12, 
+    min_n = 3, 
+    loss_reduction = tune(),  
+    sample_size = 0.3779710, 
+    mtry = tune(),
+    learn_rate = 0.012945107
+) %>% 
+    set_engine('xgboost', objective = "multi:softprob") %>% 
+    set_mode('classification')
+
+param_grid <- grid_latin_hypercube(
+    # min_n(), 
+    loss_reduction(),
+    finalize(mtry(), train2[-1]),
+    size = 50
+)
+```
+
+## 워크 플로우
+
+```{r}
+workflow <- workflow() %>%
+  add_model(tune_spec) %>% 
+  add_formula(credit ~ .)
+```
+
+## 튜닝
+
+```{r}
+library(doParallel)
+Cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(Cluster)
+
+library(tictoc)
+tic()
+tune_result <- workflow %>% 
+  tune_grid(validation_split,
+            grid = param_grid,
+            metrics = metric_set(mn_log_loss))
+toc()
+```
+
+```{r}
+tune_result %>% 
+  collect_metrics()
+```
+
+# 튜닝결과 시각화
+
+```{r message=FALSE}
+tune_result %>%
+  collect_metrics() %>%
+  filter(.metric == "mn_log_loss") %>% 
+  ggplot(aes(mtry, mean, color = .metric)) +
+  geom_line(size = 1.5) +
+  scale_x_log10() +
+  theme(legend.position = "none") +
+  labs(title = "Mean Log loss")
+```
+
+```{r}
+tune_result %>% show_best()
+```
+
+# 모델 확정
+
+```{r}
+tune_best <- tune_result %>% select_best(metric = "mn_log_loss")
+final_spec <- finalize_model(tune_spec, tune_best)
+final_spec
+# Boosted Tree Model Specification (classification)
+# 
+# Main Arguments:
+#   mtry = 9
+#   trees = 1000
+#   min_n = 3
+#   tree_depth = 12
+#   learn_rate = 0.012945107
+#   loss_reduction = 8.71807395454724e-07
+#   sample_size = 0.377971
+# 
+# Engine-Specific Arguments:
+#   objective = multi:softprob
+# 
+# Computational engine: xgboost 
+```
+
+# 워크플로우 업데이트 및 마지막 학습
+
+```{r}
+workflow %<>% update_model(final_spec)
+xgb_fit <- fit(workflow, data = train2)
+```
+
+# 예측하기
+
+```{r warning=FALSE}
+result <- predict(xgb_fit, test2, type = "prob")
+result %>% head()
+result
+```
+
+```{r, message=FALSE}
+submission <- read_csv(file.path(file_path, "sample_submission.csv"))
+sub_col <- names(submission)
+submission <- bind_cols(submission$index, result)
+names(submission) <- sub_col
+write.csv(submission, row.names = FALSE,
+          "baseline_dacon_credit_xgb.csv")
+```
+
