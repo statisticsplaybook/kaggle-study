@@ -1,0 +1,612 @@
+{
+    "cells": [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# [슬기로운 통계생활](https://www.youtube.com/c/statisticsplaybook) at DACON!\n",
+                "\n",
+                "안녕하세요~! R 사용자들의 데이터 경진대회 참여율을 높이기 위해서 baseline 코드 공개합니다. 요즘 핫한 Tidymodels를 사용해서 월간 데이콘 14 - 신용카드 사용자 연체 예측 AI 경진대회 베이스라인을 잡아보도록 합시다.\n",
+                "\n",
+                "[슬통 캐글 R 스터디](https://www.youtube.com/playlist?list=PLKtLBdGREmMlJCXjCpCi5B4KQ-TsFvAAi)에도 많은 관심 부탁드립니다! R유저 화이팅~! 😎\n",
+                "\n",
+                "# 준비작업\n",
+                "\n",
+                "## 패키지 불러오기\n",
+                "\n",
+                "이번 포스팅에서 사용할 R패키지들을 불러오자. 특히 요즘 핫하디 핫한 `tidymodels` 사용하여 월마트 대회를 가지고 놀아본다. 또한 마이 빼이보릿 연산자들을 사용하기 위하여 `magrittr`를 불러왔다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "suppressMessages(library(magrittr))\n",
+                "suppressMessages(library(tidymodels)) %>% suppressWarnings()\n",
+                "suppressMessages(library(tidyverse)) %>% suppressWarnings()\n",
+                "suppressMessages(library(skimr)) %>% suppressWarnings()\n",
+                "suppressMessages(library(knitr)) %>% suppressWarnings()\n",
+                "theme_set(theme_bw())\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 데이터셋 불러오기\n",
+                "\n",
+                "이 대회에서 주어진 데이터셋을 불러보자. 주어진 파일 리스트는 다음과 같다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "file_path <- \"../input/daconcredit14/\"\n",
+                "files <- list.files(file_path)\n",
+                "files\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "각 변수의 이름을 `janitor` 패키지로 말끔하게 바꿔준다.\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "train <- read_csv(file.path(file_path, \"train.csv\")) %T>% \n",
+                "  suppressMessages() %>% \n",
+                "  janitor::clean_names()\n",
+                "test <- read_csv(file.path(file_path, \"test.csv\")) %T>%\n",
+                "  suppressMessages() %>% \n",
+                "  janitor::clean_names()\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 데이터 기본정보 확인\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "train %>% \n",
+                "  head() %>% \n",
+                "  kable() %>% \n",
+                "  kableExtra::kable_styling(\"striped\") %>% \n",
+                "  kableExtra::scroll_box(width = \"100%\")\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 기본 정보\n",
+                "\n",
+                "이 대회는 기본적으로 간단한 대회이다. 첫번째 스터디용 대회로 선택을 한 이유이기도 하다. 주 데이터는 2만 6천개의 train 표본과 1만개의 test 표본들로 구성이 되어있다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "dim(train)\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "\n"
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "dim(test)\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "각 데이터 셋의 변수명을 살펴보자. \n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "names(train)\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "\n"
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "names(test)\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "먼저 `test` 데이터에는 우리가 예측하고 싶은 변수인 `credit` 변수가 들어있지 않은 것을 알 수 있다. \n",
+                "\n",
+                "데이터를 훑어보기 위해서 `skim()` 함수를 이용하자. 이 함수는 데이터에 들어있는 변수들을 타입 별로 분석해서 리포트를 작성해준다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "skim(train)\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "결과를 살펴보자. 먼저 결측치가 상대적으로 많이 없는 착한? 데이터이다. character 변수의 complete rate를 살펴보면 모든 변수가 1이고, `occyp_type` 변수만이 결측치가 8171개가 존재하는 것을 알 수 있다. 또한 고맙게도 numeric 변수의 결측치는 하나도 없다!😆\n",
+                "\n",
+                "같은 함수를 사용해서 `test` 셋을 보면 똑같은 패턴을 가지고 있는 것을 알 수 있다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "skim(test)\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 시각화\n",
+                "\n",
+                "베이스 라인을 잡은 문서이니 간단하게 시각화 하나만 하고 넘어가자. (코드를 응용해서 다른 변수에 대한 상관 관계를 볼 수 있을 것이다.)\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "train %>%\n",
+                "  ggplot(aes(x = factor(credit), y = income_total)) +\n",
+                "  geom_boxplot() +\n",
+                "  facet_grid(. ~ income_type)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "목표 변수인 credit은 낮을 수록 높은 신용의 신용카드 사용자를 의미 한다고 한다. Commercial associate 인 경우 신용이 제일 낮은 그룹의 수입의 중앙값이 제일 높다. 돈을 많이 벌수록 돈 갚은 개념이 없어지는 것인가? 재미있는 현상이다. 학생 클래스의 경우 train 데이터에 셋이 많이 없다는 것을 알 수 있다. 추후에 다른 클래스로 통합을 시키는 것이 좋을 것이다.\n",
+                "\n",
+                "# 전처리 하기\n",
+                "\n",
+                "`tidymodels`에서는 전처리를 할 때 `recipe` 라는 패키지를 사용한다. 이 패키지에는 전처리를 하는 방법을 음식 레피시 처럼 적어놓는다고 생각하면 쉽다.\n",
+                "\n",
+                "## all_data 묶기\n",
+                "\n",
+                "앞으로 전처리를 할 때 좀 더 편리하게 하기 위해서 `all_data`로 묶어내도록 하자.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "all_data <- bind_rows(train, test)\n",
+                "all_data %>% dim()\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 전처리 사항들\n",
+                "\n",
+                "* 결과값인 credit 변수와 character 타입의 변수들을 factor 변수로 바꿔주자.\n",
+                "* 나이와 직업을 가진 기간을 년수로 바꿔준다.\n",
+                "\n",
+                "## `recipe`를 통한 전처리 입력\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "credit_recipe <- all_data %>% \n",
+                "  recipe(credit ~ .) %>% \n",
+                "  step_mutate(credit = as.factor(credit)) %>% \n",
+                "  # age and employment period in yrs\n",
+                "  step_mutate(yrs_birth = -ceiling(days_birth/365),\n",
+                "              yrs_employed = -ceiling(days_employed/356)) %>% \n",
+                "  step_rm(index, days_birth, days_employed) %>%\n",
+                "  step_unknown(occyp_type) %>% \n",
+                "  step_integer(all_nominal(), -all_outcomes()) %>% \n",
+                "  step_center(all_predictors(), -all_outcomes()) %>% \n",
+                "  prep(training = all_data)\n",
+                "\n",
+                "print(credit_recipe)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## `juice`를 통한 전처리 즙짜기\n",
+                "\n",
+                "`juice()` 함수를 통해서 recipe에 입력된 전처리를 짜낸 데이터를 얻어온다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "all_data2 <- juice(credit_recipe)\n",
+                "head(all_data2)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "다음과 같이 결측치 없이 잘 코딩된 데이터를 얻었다는 것을 확인 할 수 있다.\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "all_data2 %>%\n",
+                "map_df(~sum(is.na(.))) %>%\n",
+                "  pivot_longer(cols = everything(),\n",
+                "       names_to = \"variable\",\n",
+                "       values_to = \"na_count\") %>% \n",
+                "  filter(na_count > 0)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "전처리가 끝났으므로, train과 test셋을 나눈다.\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "train_index <- seq_len(nrow(train))\n",
+                "train2 <- all_data2[train_index,]\n",
+                "test2 <- all_data2[-train_index,]\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 튜닝 준비하기\n",
+                "\n",
+                "`validation_split()` 함수를 사용하여 평가셋을 분리한다. 한 단계 더 나아간 cross validation은 `vfold_cv()`함수에서 제공하니 찾아보도록 하자.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "set.seed(2021)\n",
+                "\n",
+                "validation_split <- validation_split(train2, prop = 0.7, \n",
+                "                                     strata = credit)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 튜닝 스펙 설정\n",
+                "\n",
+                "랜덤 포레스트를 사용할 것이고, mtry와 min_n을 어떻게 정할지를 평가셋을 통해서 결정할 것이므로, `tune()`를 사용해서 tidymodels에게 알려주도록 한다.\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "cores <- parallel::detectCores() -1\n",
+                "cores\n",
+                "\n",
+                "tune_spec <- rand_forest(mtry = tune(),\n",
+                "                         min_n = tune(),\n",
+                "                         trees = 1000) %>% \n",
+                "    set_engine(\"ranger\",\n",
+                "               num.threads = cores) %>% \n",
+                "    set_mode(\"classification\")\n",
+                "\n",
+                "# param_grid <- grid_latin_hypercube(finalize(mtry(), x = train2[,-1]),\n",
+                "#                                    min_n(), size = 100)\n",
+                "\n",
+                "# from param tune\n",
+                "param_grid <- tibble(mtry = 3, min_n = 5)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 워크 플로우 설정\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "workflow <- workflow() %>%\n",
+                "  add_model(tune_spec) %>% \n",
+                "  add_formula(credit ~ .)\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 모델 튜닝 with tune_grid()\n",
+                "\n",
+                "# Tuning trees\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "library(tictoc)\n",
+                "tic()\n",
+                "tune_result <- workflow %>% \n",
+                "  tune_grid(validation_split,\n",
+                "            grid = param_grid,\n",
+                "            metrics = metric_set(mn_log_loss))\n",
+                "toc()\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "\n"
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "tune_result$.notes\n",
+                "tune_result %>% \n",
+                "  collect_metrics()\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 튜닝결과 시각화\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "tune_result %>%\n",
+                "  collect_metrics() %>%\n",
+                "  filter(.metric == \"mn_log_loss\") %>% \n",
+                "  ggplot(aes(mtry, mean, color = .metric)) +\n",
+                "  geom_line(size = 1.5) +\n",
+                "  scale_x_log10() +\n",
+                "  theme(legend.position = \"none\") +\n",
+                "  labs(title = \"Mean Log loss\")\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "\n"
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "tune_result %>% show_best()\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "\n"
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "tune_best <- tune_result %>% select_best(metric = \"mn_log_loss\")\n",
+                "tune_best$mtry\n",
+                "tune_best$min_n\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 튜닝된 모델 학습하기\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "rf_model <- \n",
+                "  rand_forest(mtry = tune_best$mtry,\n",
+                "              min_n = tune_best$min_n,\n",
+                "              trees = 1000) %>% \n",
+                "    set_engine(\"ranger\", seed = 2021, \n",
+                "               num.threads = cores) %>% \n",
+                "    set_mode(\"classification\")\n",
+                "\n",
+                "tictoc::tic()\n",
+                "rf_fit <- \n",
+                "    rf_model %>% \n",
+                "    fit(credit ~ ., data = train2)\n",
+                "tictoc::toc()\n",
+                "\n",
+                "options(max.print = 10)\n",
+                "rf_fit\n",
+                "# Ranger result\n",
+                "# \n",
+                "# Type:                             Probability estimation \n",
+                "# Number of trees:                  1000 \n",
+                "# Sample size:                      26457 \n",
+                "# Number of independent variables:  18 \n",
+                "# Mtry:                             3 \n",
+                "# Target node size:                 5 \n",
+                "# Variable importance mode:         none \n",
+                "# Splitrule:                        gini \n",
+                "# OOB prediction error (Brier s.):  0.2308023 \n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 예측하기\n",
+                "\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "result <- predict(rf_fit, test2, type = \"prob\")\n",
+                "result %>% head()\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "\n"
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "submission <- read_csv(file.path(file_path, \"sample_submission.csv\"))\n",
+                "sub_col <- names(submission)\n",
+                "submission <- bind_cols(submission$index, result)\n",
+                "names(submission) <- sub_col\n",
+                "write.csv(submission, row.names = FALSE,\n",
+                "          \"baseline_dacon_credit.csv\")\n"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "\n"
+        }
+    ],
+    "metadata": {
+        "anaconda-cloud": "",
+        "kernelspec": {
+            "display_name": "R",
+            "langauge": "R",
+            "name": "ir"
+        },
+        "language_info": {
+            "codemirror_mode": "r",
+            "file_extension": ".r",
+            "mimetype": "text/x-r-source",
+            "name": "R",
+            "pygments_lexer": "r",
+            "version": "3.4.1"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 1
+}
