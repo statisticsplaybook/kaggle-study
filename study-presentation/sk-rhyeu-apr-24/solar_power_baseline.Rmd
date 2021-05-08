@@ -41,6 +41,7 @@ needs(lubridate)
 needs(tidymodels)
 needs(fpp2)
 needs(parallel)
+needs(ranger)
 ```
 
 # 대회 : 동서발전 태양광 발전량 예측 AI 경진대회
@@ -53,16 +54,23 @@ here()
 
 ```{r}
 ## data read
-dangjin_fcst = fread(here("competition/dacon_solar_power", file_list[1]))
-dangjin_obs = fread(here("competition/dacon_solar_power", file_list[2])
-                    , encoding = "UTF-8")
-energy = fread(here("competition/dacon_solar_power", file_list[3]))
-sample_submision = fread(here("competition/dacon_solar_power", file_list[4]))
-site_info = fread(here("competition/dacon_solar_power", file_list[5])
-                  , encoding = "UTF-8")
-ulsan_fcst = fread(here("competition/dacon_solar_power", file_list[6]))
-ulsan_obs = fread(here("competition/dacon_solar_power", file_list[7])
-                  , encoding = "UTF-8")
+dangjin_fcst = fread(
+    here("competition/dacon_solar_power", file_list[1]))
+dangjin_obs = fread(
+    here("competition/dacon_solar_power", file_list[2]),
+     encoding = "UTF-8")
+energy = fread(
+    here("competition/dacon_solar_power", file_list[3]))
+sample_submision = fread(
+    here("competition/dacon_solar_power", file_list[4]))
+site_info = fread(
+    here("competition/dacon_solar_power", file_list[5]),
+    encoding = "UTF-8")
+ulsan_fcst = fread(
+    here("competition/dacon_solar_power", file_list[6]))
+ulsan_obs = fread(
+    here("competition/dacon_solar_power", file_list[7]),
+    encoding = "UTF-8")
 ```
 
 - site_info.csv - 발전소 정보
@@ -239,25 +247,12 @@ energy_data %>% group_by(site, hour) %>% count() %>%
 
 ```
 ```{r}
-energy_data %>% group_by(site) %>% summarize(min = min(hour), 
-                                             max = max(hour))
+energy_data %>% 
+    group_by(site) %>% 
+    summarize(min = min(hour),
+              max = max(hour))
 ```
 
-
-
-```
-energy %>%
-    # 예측 대상이 되는 값만 확인
-    filter(
-        (site == 'dangjin_floating' & power >= 100) |
-        (site == 'dangjin_warehouse' & power >= 70) |
-            (site == 'dangjin' & power >= 100) |
-            (site == 'ulsan' & power >= 50)
-    ) %>%
-    ggplot(aes(x = month, y = power, fill = site)) +
-    geom_boxplot() #+
-    #facet_wrap(~site)
-```
 ## base line modeling : group mean method - 39.58257 (52~72등)
 
 1. 시간대별 group mean
@@ -329,14 +324,18 @@ write.csv(sample_submision,
 
 
 
-#머신러닝 모델
- - 2020년 2월~2021년 1월을 validation set으로 지정하려고 해서 initial_time_split이나 
+- 2.머신러닝 모델
+    - 2020년 2월~2021년 1월을 validation set으로 지정하려고 해서 initial_time_split을 시도했으나 실패
+    - tidymodels에서 학습한 값으로 predict가 안됨
+    (에러: Can't subset columns that don't exist. x Column `power` doesn't exist.)
+    - ranger를 썼는데 데이터 타입 에러로 report 실패
 
 ```{r}
 energy %>%
     mutate(time = ymd_hms(energy$time)) %>%
     pivot_longer(!time, names_to = 'site', values_to = 'power') -> energy_data
-# 
+
+dim(energy_data)
 # energy_data %>% filter(
 #     '2020-02-01 01:00:00' > time) -> train # 67356 행
 # 
@@ -356,7 +355,7 @@ energy %>%
 # 
 # validation_split<- test %>% validation_split(prop = .1^4)
 
-validation_split<- energy_data %>% validation_split(prop = 2/3)
+# validation_split<- energy_data %>% validation_split(prop = 2/3)
 # 
 # validation_split
 ```
@@ -370,12 +369,14 @@ validation_split<- energy_data %>% validation_split(prop = 2/3)
 solar_recipe <- energy_data %>%
     recipe(power~.) %>% 
     update_role(time, new_role = "ID") %>% 
-    step_mutate(week = week(time),
+    # step_date로 하면 시간 정보 산출이 안 됨.
+    step_mutate(week = week(time), 
                 day = day(time),
                 hour = hour(time),
                 am = am(time)
-                ) %>% 
-    step_naomit(all_numeric())%>% prep()
+                ) %>%
+    step_naomit(all_numeric()) %>% 
+    prep()
 ```
 
 ```{r}
@@ -430,11 +431,68 @@ solar_rf_fit <- solar_wflow %>%
 ```
 
 ```{r}
-juice(solar_recipe)
+# juice(solar_recipe)
+```
+
+```{r}
+juice(solar_recipe) %>% skim()
+```
+
+```{r}
+predict(solar_rf_fit, juice(solar_recipe))
 ```
 
 
 ```{r}
-predict(solar_rf_fit, new_data = juice(solar_recipe) )
+model <- ranger(
+    power ~ ., 
+    data = juice(solar_recipe) %>% select(-c(time)),
+    num.threads = cores,
+    seed = 1234)
+```
+
+```{r}
+model
+```
+
+
+```{r}
+sample_submision %>% 
+mutate(time = ymd_hms(time)) %>%
+    pivot_longer(!time, names_to = 'site', values_to = 'power') -> submission_pivot
+```
+
+
+```{r}
+solar_recipe %>% 
+    bake(submission_pivot) -> submission_baked
+```
+
+
+```{r}
+solar_ranger_predict <- predict(model, 
+        data = submission_baked
+        ) 
+```
+
+```{r}
+submission_baked %>% 
+    bind_cols(solar_ranger_predict$predictions %>% round() %>% as.integer) %>% 
+    rename('predict' = '...8' ) %>% 
+    select(time, site, predict) %>% 
+    pivot_wider(
+        names_from = site,
+        values_from = predict
+    ) -> sample_submision2
+```
+
+```{r}
+sample_submision2 %>% head()
+```
+
+```{r}
+write.csv(sample_submision2,
+          row.names = F, here('study-presentation/sk-rhyeu-apr-24/submission2.csv'), 
+          fileEncoding = 'UTF-8')
 ```
 
