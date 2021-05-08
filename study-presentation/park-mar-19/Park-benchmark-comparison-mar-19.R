@@ -29,13 +29,8 @@ names(all_data)
 ### Set a benchmark model as only take store as a predictor
 bench_recipe <- all_data %>% 
     recipe(weekly_sales ~ store) %>% 
-    # step_date(date, features = c("month")) %>% 
-    # step_rm(date)  %>% 
     step_mutate(
         store = as.factor(store)) %>%
-        # dept = as.factor(dept)
-        # , date_year = as.factor(date_year) %>% 
-    # step_dummy(all_nominal(), -all_outcomes()) %>%
     prep()
 
 bench_recipe %>% print()
@@ -66,16 +61,11 @@ write.csv(submission_bench,
 
 ### Make recipe
 
-### Set a benchmark model as only take store as a predictor
 strdept_recipe <- all_data %>% 
     recipe(weekly_sales ~ store + dept) %>% 
-    # step_date(date, features = c("month")) %>% 
-    # step_rm(date)  %>% 
     step_mutate(
         store = as.factor(store),
         dept = as.factor(dept)) %>%
-    # , date_year = as.factor(date_year) %>% 
-    # step_dummy(all_nominal(), -all_outcomes()) %>%
     prep()
 
 strdept_recipe %>% print()
@@ -105,15 +95,10 @@ write.csv(submission_strdept,
 
 ### Make recipe
 
-### Set a benchmark model as only take store as a predictor
 strbi_recipe <- all_data %>% 
     recipe(weekly_sales ~ store) %>% 
-    # step_date(date, features = c("month")) %>% 
-    # step_rm(date)  %>% 
     step_mutate(
         store = as.factor(store)) %>%
-    #    dept = as.factor(dept)) %>%
-    # , date_year = as.factor(date_year) %>% 
     step_dummy(all_nominal(), -all_outcomes()) %>%
     prep()
 
@@ -147,12 +132,9 @@ write.csv(submission_strbi,
 ### Set a benchmark model as only take store as a predictor
 strdeptbi_recipe <- all_data %>% 
     recipe(weekly_sales ~ store + dept) %>% 
-    # step_date(date, features = c("month")) %>% 
-    # step_rm(date)  %>% 
     step_mutate(
         store = as.factor(store),
         dept = as.factor(dept)) %>%
-    # , date_year = as.factor(date_year) %>% 
     step_dummy(all_nominal(), -all_outcomes()) %>%
     prep()
 
@@ -511,9 +493,6 @@ write.csv(submission_normfp_time,
 ## benchmark + cpi model (normalized) + time vars.
 
 ### Make recipe
-## benchmark + fuel_price model (normalized) + time vars.
-
-### Make recipe
 
 ### As cpi has some NAs, we have several options.
 ### First, remove the NAs.
@@ -557,6 +536,7 @@ write.csv(submission_fpcpi_nona,
           "study-presentation/park-mar-19/submissions/fpcpi_nona_model.csv")
 
 ## Score is 21924.30518. If you just remove the NAs, score gets worse.
+
 
 ## Impute:
 
@@ -647,12 +627,13 @@ write.csv(submission_fpcpi_median,
 
 ### Score is 11322.97579. Mean impute is slightly better to predict.
 
-### Imputation via K-Nearest Neighbors
-####  impute the missing values for the variables using a nearest neighbors 
-####  model with all predictors.
+## Model with unemployment with median imputation
 
-fpcpi_kmean_recipe <- all_data_fs %>% 
-    recipe(weekly_sales ~ store + dept + fuel_price + cpi + 
+### Make recipe
+
+unemp_recipe <- all_data_fs %>% 
+    recipe(weekly_sales ~ store + dept + fuel_price + 
+               cpi + unemployment + 
                month + novDec + holiday) %>% 
     step_mutate(
         store = as.factor(store),
@@ -661,317 +642,71 @@ fpcpi_kmean_recipe <- all_data_fs %>%
         novDec = as.factor(novDec),
         holiday = as.factor(holiday)
     ) %>%
+    step_meanimpute(all_numeric()) %>%
     step_dummy(all_nominal(), -all_outcomes()) %>%
     step_normalize(all_predictors(), -all_nominal()) %>%
-    step_knnimpute(all_predictors()) %>%
     prep()
 
-fpcpi_kmean_recipe %>% print()
+unemp_recipe %>% print()
 
-fpcpi_kmean <- juice(fpcpi_kmean_recipe)
+unemp <- juice(unemp_recipe)
 
-## compare
-summary(fpcpi_nona$cpi)
-summary(fpcpi_mean$cpi)
-summary(fpcpi_kmean$cpi)
+train_unemp <- unemp[index,]
+test_unemp <- unemp[-index,]
 
-train_fpcpi_kmean <- fpcpi_kmean[index,]
-test_fpcpi_kmean <- fpcpi_kmean[-index,]
-
-lm_train_fpcpi_kmean_fit <- 
+lm_train_unemp_fit <- 
     linear_reg() %>% 
     set_engine("lm") %>%
-    fit(weekly_sales ~ ., data = train_fpcpi_kmean)
+    fit(weekly_sales ~ ., data = train_unemp)
 
-result_fpcpi_kmean <- predict(lm_train_fpcpi_kmean_fit, test_fpcpi_kmean)
+result_unemp <- predict(lm_train_unemp_fit, test_unemp)
 
-submission_fpcpi_kmean <- read_csv("study-presentation/park-mar-19/submissions/sampleSubmission.csv")
-submission_fpcpi_kmean$Weekly_Sales <- result_fpcpi_kmean$.pred
-write.csv(submission_fpcpi_kmean, 
+submission_unemp <- read_csv("study-presentation/park-mar-19/submissions/sampleSubmission.csv")
+submission_unemp$Weekly_Sales <- result_unemp$.pred
+write.csv(submission_unemp, 
           row.names = F, 
-          "study-presentation/park-mar-19/submissions/fpcpi_kmean_model.csv")
+          "study-presentation/park-mar-19/submissions/unemp_model.csv")
 
+### Score is 11303.91989 with mean-imputed unemployment and cpi
 
+### Lastly, see the zerovariance
 
-step_impute_linear()
-
-step_unknown()
-
-
-
-
-### random Forest `worflow`
-
-```{r}
-cores <- parallel::detectCores() -1
-```
-
-
-```{r}
-rf_model <- 
-    rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
-    set_engine("ranger", seed = 1234, num.threads = cores) %>% 
-    set_mode("regression")
-```
-
-```{r}
-walmart_wflow <- workflow() %>% 
-    add_model(rf_model) %>% 
-    add_recipe(walmart_recipe)
-
-walmart_wflow
-```
-
-#### hyperparameter tuning 
-```{r}
-set.seed(1234)
-
-rf_result <- walmart_wflow %>% 
-    tune_grid(walmart_validation,
-              grid = 5,
-              control = control_grid(save_pred = TRUE),
-              metrics = metric_set(rmse))
-```
-
-```{r}
-rf_result %>% show_best()
-```
-
-```{r}
-rf_best <- 
-    rf_result %>% 
-    select_best(metric = "rmse")
-
-rf_best
-```
-
-#### best fit with tuned hyperparameters
-```{r}
-### the last model
-rf_best_model <- 
-    rand_forest(mtry = rf_best$mtry, min_n = rf_best$min_n, trees = 1000) %>% 
-    set_engine("ranger", seed = 1234, 
-               num.threads = cores,
-               importance = "impurity") %>% 
-    set_mode("regression")
-
-
-final_rf_wflow <- walmart_wflow %>% 
-    update_model(rf_best_model)
-
-set.seed(1234)
-rf_best_fit <- final_rf_wflow %>% 
-    fit(train)
-```
-
-```{r}
-rf_best_fit
-```
-
-## submit prediction
-```{r}
-subfile <- read_csv(here("walmart/sampleSubmission.csv.zip"))
-
-
-subfile$Weekly_Sales <- rf_best_fit %>% 
-    predict(test) %>% 
-    select(.pred) %>% unlist()
-
-
-subfile
-
-
-write.csv(subfile, row.names = FALSE,
-          here("walmart/tuning-rf.csv"))
-
-```
-
-```{r}
-last_week <- c(20660.01047 , 20238.71579)
-today <- c(3672.12956, 3536.56464)
-
-scores <- rbind(last_week, today) 
-colnames(scores) <- c("private", "public" )
-scores
-```
-
-- last week's score : 20660.01047 / 20238.71579
-- today's score : 3672.12956 / 3536.56464
-
-
-
-## Attachment 1 : CV with decision tree in `tidymodels`
-
-```{r}
-set.seed(1234)
-walmart_split <- initial_split(train, prop = 0.7, strata = is_holiday)
-
-walmart_split
-```
-```{r}
-train_data <- walmart_split %>% training()
-val_data <- walmart_split %>% testing()
-```
-
-```{r}
-tune_spec <-
-    decision_tree(
-        cost_complexity = tune(),
-        tree_depth = tune()
-    ) %>% 
-    set_engine("rpart") %>%     
-    set_mode("regression")
-
-
-tune_spec
-```
-
-```{r}
-tree_grid <- grid_regular(cost_complexity(),
-                          tree_depth(),
-                          levels = 3
-)
-
-tree_grid %>% head() %>% kable()
-
-# tree_grid %>% count(cost_complexity)
-# tree_grid %>% count(tree_depth)
-```
-
-```{r}
-set.seed(1234)
-walmart_folds <- vfold_cv(train, v= 5, strata = is_holiday)
-
-# walmart_folds
-
-tree_wf <- workflow() %>% 
-    add_model(tune_spec) %>% 
-    add_recipe(walmart_recipe)
-```
-
-```{r}
-walmart_treefit <- 
-    tree_wf %>% 
-    tune_grid(
-        resamples = walmart_folds,
-        grid = tree_grid
-    )
-
-
-walmart_treefit
-```
-
-```{r}
-walmart_treefit %>% 
-    collect_metrics() %>% 
-    head(12) %>% 
-    kable()
-
-```
-
-```{r}
-best_tree <- walmart_treefit %>% 
-    select_best("rmse")
-
-best_tree
-```
-
-```{r}
-final_walmart_tree <-
-    tree_wf %>% 
-    finalize_workflow(best_tree)
-
-final_walmart_tree
-```
-
-```{r}
-walmart_treefit2 <- 
-    final_walmart_tree %>% 
-    fit(data = train_data)
-```
-
-```{r}
-walmart_treefit2 %>% 
-    predict(val_data) %>% 
-    bind_cols(val_data) %>%  select(weekly_sales,.pred) %>% 
-    metrics(truth = weekly_sales, estimate = .pred)
-```
-
-
-##  Attachment 2 :oridinary linear model fitting
-
-
-
-```{r}
-walmart_recipe2 <- train_data %>% 
-    recipe(weekly_sales ~ .) %>% 
-    step_date(date, features = c("month")) %>% 
-    step_rm(date)  %>% 
+zv_recipe <- all_data_fs %>% 
+    recipe(weekly_sales ~ store + dept + fuel_price + 
+               cpi + unemployment + 
+               month + novDec + holiday) %>% 
     step_mutate(
         store = as.factor(store),
-        dept = as.factor(dept)
-        # , date_year = as.factor(date_year)
-    ) %>% 
-    step_dummy(all_nominal(), -all_outcomes()) %>% prep()
+        dept = as.factor(dept),
+        month = as.factor(month),
+        novDec = as.factor(novDec),
+        holiday = as.factor(holiday)
+    ) %>%
+    step_meanimpute(all_numeric()) %>%
+    step_dummy(all_nominal(), -all_outcomes()) %>%
+    step_normalize(all_predictors(), -all_nominal()) %>%
+    step_zv(all_numeric()) %>%
+    prep()
 
-walmart_recipe2 %>% print()
-```
+zv_recipe %>% print()
 
-```{r}
-lm_model <- 
+zv <- juice(zv_recipe)
+
+train_zv <- zv[index,]
+test_zv <- zv[-index,]
+
+lm_train_zv_fit <- 
     linear_reg() %>% 
-    set_engine("lm") %>% 
-    set_mode("regression")
-```
+    set_engine("lm") %>%
+    fit(weekly_sales ~ ., data = train_zv)
 
+result_zv <- predict(lm_train_zv_fit, test_zv)
 
-```{r}
-walmart_wflow2 <- workflow() %>% 
-    add_model(lm_model) %>% 
-    add_recipe(walmart_recipe2)
+submission_zv <- read_csv("study-presentation/park-mar-19/submissions/sampleSubmission.csv")
+submission_zv$Weekly_Sales <- result_zv$.pred
+write.csv(submission_zv, 
+          row.names = F, 
+          "study-presentation/park-mar-19/submissions/zv_model.csv")
 
-walmart_wflow2
-```
+### Score is 11303.91989.
 
-```{r}
-walmart_lmfit <- walmart_wflow2 %>% 
-    fit(train_data)
-```
-
-
-
-```{r}
-walmart_lmfit %>% 
-    predict(val_data) %>% 
-    bind_cols(val_data) %>%  select(weekly_sales,.pred) %>% 
-    metrics(truth = weekly_sales, estimate = .pred)
-```
-
-### ??
-
-```{r}
-walmart_lmfit %>% tidy()
-```
-
-```{r}
-untidy_fit <- lm(weekly_sales ~ ., data = juice(walmart_recipe2))
-```
-
-```{r}
-predict(untidy_fit, 
-        newdata = 
-            bake(walmart_recipe2, new_data = val_data)) %>% 
-    bind_cols(val_data) %>%
-    select(weekly_sales, '...1') %>%
-    metrics(truth = weekly_sales,
-            estimate = '...1')
-```
-
-```{r}
-untidy_fit %>% summary()
-```
-
-- reference :
-    - [A Gentle Introduction to tidymodels](https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/)
-- [왜 당근(caret)은 안되고 새로운 신상 당근(Tidymodel)인가?](https://statkclee.github.io/ds-authoring/ds-why-tidymodels.html#/predictive-model)
-                                             - [Tidymodels' GET STARTED](https://www.tidymodels.org/start/)
