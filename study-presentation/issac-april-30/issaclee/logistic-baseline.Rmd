@@ -1,0 +1,319 @@
+---
+title: "Get your boat tidy"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.align = "center")
+```
+
+
+![Photo stealed from [here](https://unsplash.com/photos/Yi_S3JgxMmk)](https://images.unsplash.com/photo-1572969065830-5c390f345b78?ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&ixlib=rb-1.2.1&auto=format&fit=crop&w=1891&q=80)
+
+# Preperation {.tabset .tabset-fade}
+
+## Library load
+
+Load R pacakges for Kaggling. I usually use these for any notebook thesedays, why not in here? 🤣
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+# remotes::install_github("curso-r/treesnip")
+library(treesnip)
+library(tidymodels)
+library(tidyverse)
+library(magrittr)
+library(skimr)
+library(knitr)
+theme_set(theme_bw())
+```
+
+## Dataset load
+
+These are the file list in the competition. We have only `train` and `test` data for this notebook.
+
+```{r}
+file_path <- "../input/tabular-playground-series-apr-2021/"
+files <- list.files(file_path)
+files
+```
+
+One note; I love to convert the variables names by using `janitor` package because the result are consist and not distracting.
+
+```{r, message=FALSE}
+train <- read_csv(file.path(file_path, "train.csv")) %>% 
+  janitor::clean_names()
+test <- read_csv(file.path(file_path, "test.csv")) %>% 
+  janitor::clean_names()
+```
+
+# Basic info. {.tabset .tabset-fade}
+
+## Basic info.
+
+This competition data set has very simple structure. `train` has 100,000 samples and `train` has 100,000 samples.
+
+```{r}
+dim(train)
+dim(test)
+```
+
+The list of the variables in `train` we have is as follows:
+
+```{r class.source = 'fold-hide'}
+index <- 1:ncol(train)
+glue::glue("Train set variable {index}: {names(train)}") 
+```
+
+The list of the variables in `test` we have is as follows:
+
+```{r class.source = 'fold-hide'}
+index <- 1:ncol(test)
+glue::glue("Train set variable {index}: {names(test)}") 
+```
+
+As we can see the `test` data doesn't have the `survived` variable; which is the target variable we need to predict!
+
+## train and test data snippet
+
+```{r}
+head(train) %>% kable()
+head(train) %>% kable()
+```
+
+## train data skim
+
+`skim()` function is useful for you to get the big picture about your data. It generates the tidy report of your data set. 
+
+```{r}
+skim(train)
+```
+
+When we look at the complete rate for each variables, `cabin` have a most missing values.
+
+## test data skim
+
+Test data also has a similar distribution of missing values, too. However, one thing that I have notice here is that `age` in test data set has a slightly different distribution than the one of `train` data set.
+
+```{r}
+skim(test)
+```
+
+# Simple visualization {.tabset .tabset-fade}
+
+Here are some visualization code, you can adjust this little bit for your own EDA. The following is the distribution of our target variable; as we can see this is a balanced data set. 😆
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+    count(survived) %>% 
+    mutate(proportion = n / sum(n)) %>% 
+    ggplot(aes(x = factor(survived), y = proportion, 
+               fill = factor(survived))) +
+    geom_bar(stat = "identity") +
+    labs(title = "Bar chart for target variable",
+         subtitle = "Variable label: 'survived'",
+         x = "Survived") +
+    scale_fill_brewer(palette = "Set1",
+                      labels = c("No", "Yes")) +
+    guides(fill = guide_legend(title = "Survival",
+                               ncol = 2, )) +
+    theme(legend.position = "bottom")
+```
+
+# Preprocessing with `recipe`
+
+## `all_data` combine
+
+Before I combine the `train` and `test` set, I transformed `weekly_sale`, and then combined them into `all_data`.
+
+```{r}
+all_data <- bind_rows(train, test)
+all_data %>% head()
+names(all_data)
+dim(all_data)
+```
+
+## Make preprocessing recipe
+
+`recipe` has useful step [functions](https://recipes.tidymodels.org/reference/index.html) for data preprocessing. This will save your a lot of time!
+
+```{r}
+titanic_recipe <- all_data %>% 
+    recipe(survived ~ .) %>%
+    step_mutate(
+        survived = factor(survived),
+        last_name = word(name, 1)
+        ) %>% 
+    step_modeimpute(embarked) %>% 
+    step_meanimpute(age, fare) %>% 
+    step_rm(passenger_id, cabin, ticket) %>% 
+    step_integer(all_nominal(), -all_outcomes()) %>% 
+    step_center(all_predictors(), -all_outcomes()) %>% 
+    prep(training = all_data)
+
+all_data2 <- juice(titanic_recipe)
+all_data2 %>% dim()
+all_data2 %>% head()
+```
+
+`juice()` function will give you the actual preprocessed data.
+
+# Calculate model
+
+## Split the data set
+
+Let's split the data again since we are done for the preprocessing.
+
+```{r}
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+```
+
+## Validation split
+
+```{r}
+set.seed(2021)
+
+# 10 fold cv
+validation_split <- vfold_cv(v = 5, train2, strata = survived)
+```
+
+## LightGBM specification
+
+```{r}
+# Main Arguments:
+#   mtry = 1
+#   trees = 10000
+#   min_n = 38
+#   tree_depth = 10
+#   learn_rate = 0.005
+#   loss_reduction = 0.0672681981394635
+#   sample_size = 0.45471338326586
+#   stop_iter = 10
+
+lightgbm_spec <- boost_tree(
+    trees = 10000, 
+    tree_depth = 100, 
+    mtry = tune(),
+    min_n = tune(), 
+    loss_reduction = 0.0672681981394635,  
+    sample_size = 0.45471338326586, 
+    learn_rate = 0.005,
+    stop_iter = 10,
+) %>% 
+    set_engine('lightgbm',
+               num_leaves = 60,
+               # categorical_feature = c(1, 2, 5, 6, 8, 10),
+               num_threads = 10) %>% 
+    set_mode('classification')
+
+lightgbm_spec %>% translate()
+
+param_grid <- grid_random(
+    finalize(mtry(), train2[-1]),
+    min_n(), 
+    # loss_reduction(),
+    # sample_size = sample_prop(range = c(0.4, 1)),
+    size = 15
+) %>% filter(mtry > 3)
+param_grid
+```
+
+# Workflow
+
+```{r}
+lightgbm_workflow <- workflow() %>%
+    add_model(lightgbm_spec) %>% 
+    add_formula(survived ~ .)
+```
+
+# Tunning
+
+```{r}
+library(tictoc)
+tic()
+tune_result <- lightgbm_workflow %>% 
+  tune_grid(validation_split,
+            grid = param_grid,
+            metrics = metric_set(accuracy))
+toc()
+```
+## Tunning result
+
+```{r}
+tune_result$.notes[[1]]$.notes
+tune_result %>% 
+    collect_metrics()
+```
+
+```{r}
+tune_result %>% show_best()
+```
+
+
+```{r}
+tune_best <- tune_result %>% select_best(metric = "accuracy")
+final_spec <- finalize_model(lightgbm_spec, tune_best)
+final_spec
+# Boosted Tree Model Specification (classification)
+# 
+# Main Arguments:
+#   mtry = 1
+#   trees = 10000
+#   min_n = 38
+#   tree_depth = 10
+#   learn_rate = 0.005
+#   loss_reduction = 0.0672681981394635
+#   sample_size = 0.45471338326586
+#   stop_iter = 10
+# 
+# Engine-Specific Arguments:
+#   num_leaves = 60
+#   num_threads = 10
+# 
+# Computational engine: lightgbm 
+```
+
+## Fitting the model
+
+```{r}
+lightgbm_workflow %<>% update_model(final_spec)
+lightgbm_fit <- fit(lightgbm_workflow, data = train2)
+```
+
+# Prediction
+
+```{r}
+result <- predict(lightgbm_fit, test2)
+result %>% head()
+```
+
+
+# Submission
+
+```{r}
+submission <- read_csv(file.path(file_path, "sample_submission.csv"),
+                       col_types = cols(PassengerId = col_integer(),
+                                        Survived = col_integer()))
+submission$Survived <- result$.pred_class %>% as.integer() - 1
+write.csv(submission, row.names = FALSE,
+          "lightgbm_baseline.csv")
+submission %>% head()
+
+# write.csv(result2, row.names = FALSE,
+#           "group_mean.csv")
+```

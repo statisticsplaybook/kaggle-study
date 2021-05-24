@@ -1,0 +1,209 @@
+---
+title: "Lasso with Tidymodels"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center")
+```
+
+Let's apply Lasso model to the data.
+
+![Photo by <a href="https://unsplash.com/@sxy_selia?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Sangga Rima Roman Selia</a> on <a href="/s/photos/house-price?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Unsplash</a>
+  ](https://images.unsplash.com/photo-1559230928-34c7c281d7c7?ixid=MXwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHw%3D&ixlib=rb-1.2.1&auto=format&fit=crop&w=1263&q=80)
+
+# Preparations (준비작업) {.tabset .tabset-fade}
+
+## Libraries
+
+We mainly exploits the functions from the tidyvers and tidymodels packages. `magrittr` has my favorite operators!
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+library(tidymodels)
+library(tidyverse)
+library(magrittr)
+library(skimr)
+library(knitr)
+theme_set(theme_bw())
+```
+
+## Data load
+
+```{r}
+file_path <- "../input/house-prices-advanced-regression-techniques/"
+files <- list.files(file_path)
+files
+```
+
+```{r, message=FALSE}
+train <- read_csv(file.path(file_path, "train.csv"))
+test <- read_csv(file.path(file_path, "test.csv"))
+```
+
+
+# Data overview (데이터 기본정보) {.tabset .tabset-fade}
+
+## Basic info.
+
+Here is the basic information about `train` and `test`. We have approximately the same sample size for the train and test set. The number of columns in the train is 81 and the one in the test is 80.
+
+```{r}
+dim(train)
+dim(test)
+```
+
+We can see train doesn't have the target variable `SalePrice`.
+
+```{r}
+"SalePrice" %in% names(test)
+```
+
+
+## Detailed info. `train`
+
+```{r}
+skim(train)
+```
+
+## Detailed info. `test`
+
+```{r}
+skim(test)
+```
+
+# EDA with visualization (탐색적 데이터 분석) {.tabset .tabset-fade}
+
+## Distribution of `sale_price`
+
+If we check out the distribution of the house price, it is little bit skewed to the right.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+  ggplot(aes(x = SalePrice)) +
+  geom_histogram()
+```
+Since we want to build a linear regression assume that the noise follows the normal distribution, let us take a log to `SalePrice` variable.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+  ggplot(aes(x = log(SalePrice))) +
+  geom_histogram()
+```
+
+## `NA`s
+
+There is a nice package for checking out `NA`s. Let's see how many variables we have which contains `NA`s.
+
+```{r message=FALSE, warning=FALSE, class.source = 'fold-hide'}
+library(naniar)
+train %>% 
+  # select_if(~sum(is.na(.)) > 0) %>% # alternative way
+  select(where(~sum(is.na(.)) > 0)) %>% 
+  gg_miss_var()
+```
+
+We can do more analysis about `NA`s with `upset()` function, which shows that most of the observations with `NA`s in the data set have `NA`s at the `PoolQC`, `MiscFeature`, `Alley`, `Fence` at the same time.
+
+```{r message=FALSE, class.source = 'fold-hide'}
+train %>% 
+  select(where(~sum(is.na(.)) > 0)) %>% 
+  gg_miss_upset()
+```
+
+From the above, we can have some insights that if a house doesn't have Pool, it is likely that it doesn't have Alley, Fence, and Fireplace too.
+
+# Preprecessing with `recipe` (전처리 레시피 만들기)
+
+First, I would like to clean the variable names with `janitor` package so that we have consistent varible names.
+
+## `all_data` combine and name cleaning with `janitor`
+
+```{r}
+all_data <- bind_rows(train, test) %>% 
+  janitor::clean_names()
+names(all_data)[1:10]
+```
+
+## Make recipe
+
+Note that we will use mode imputation for nominal variables for the baseline, and the mean imputation for the numerical variables. However, this should be changed to build a more sensitive model because we have checked that the `NA` in the nominal variables indicates that cases where the house doesn't have the corresponding attributes.
+
+```{r}
+housing_recipe <- all_data %>% 
+  recipe(sale_price ~ .) %>%
+  step_rm(id) %>% 
+  step_log(sale_price) %>% 
+  step_modeimpute(all_nominal()) %>% 
+  step_dummy(all_nominal()) %>% 
+  step_meanimpute(all_predictors()) %>%
+  step_normalize(all_predictors()) %>% 
+  prep(training = all_data)
+
+print(housing_recipe)
+```
+
+## `juice` the all_data2 and split
+
+```{r}
+all_data2 <- juice(housing_recipe)
+```
+
+We are done for preprocessing. Let's split the data set.
+
+```{r}
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+```
+
+
+```{r}
+train2 %>% 
+  head() %>% 
+  kable()
+```
+
+# Set Ridge regression model and fitting (Ridge regeression 모델 설정 및 학습)
+
+Set `mixture` is equal to zero refering the Ridge regression in `glmnet` since the 
+
+```{r message=FALSE, warning=FALSE}
+lasso_model <- 
+    linear_reg(penalty = 0.01, mixture = 1) %>% # lasso: 1, ridge: 0
+    set_engine("glmnet")
+
+lasso_fit <- 
+    lasso_model %>% 
+    fit(sale_price ~ ., data = train2)
+
+options(max.print = 10)
+lasso_fit %>% 
+    tidy() %>% 
+    filter(estimate > 0.001)
+```
+
+# Prediction and submit (예측 및 평가)
+
+```{r warning=FALSE}
+result <- predict(lasso_fit, test2)
+result %>% head()
+```
+
+```{r}
+submission <- read_csv(file.path(file_path, "sample_submission.csv"))
+submission$SalePrice <- exp(result$.pred)
+write.csv(submission, row.names = FALSE,
+          "lasso_regression_0point1.csv")
+```
+
+
+

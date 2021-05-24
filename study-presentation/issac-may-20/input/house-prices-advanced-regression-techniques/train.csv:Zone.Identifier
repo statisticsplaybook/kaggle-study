@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=https://www.kaggle.com/c/home-data-for-ml-course/data?select=train.csv
+HostUrl=https://storage.googleapis.com/kagglesdsdata/competitions/10211/111096/train.csv?GoogleAccessId=web-data@kaggle-161607.iam.gserviceaccount.com&Expires=1615769726&Signature=PX8D9rIcRdOJ22cJzqGhANdngnegxuWQ8ef7AXcE1dbOpLwdvVOO%2BxFwqyqJgflDCzgaBxQ%2BPH5rPcj6DLCAz0qjXnFkZWYFkdvxqHQUzIVeZB3clGH43oSXwS7dlv58ACh6objFxSLCRf4EsY%2BkZmsOWzCCJua4ashA8O6yI%2BPPpe%2BaOqWfPHxpnNuXVQDCVJJo%2FZzzT60JykGI79ACWCve%2BToJOnqpoOEc6cRgU4l0KN2WwaEBhPWlPnFzQpPMmenjQzY8p36VM8Jmn2HSWTb07bMXoziH1371gy8KCL0GJWojVXYu%2BGVVCTbt52%2B0VHwSQTUPxxeNPI%2FxLPykOw%3D%3D&response-content-disposition=attachment%3B+filename%3Dtrain.csv
