@@ -1,0 +1,539 @@
+---
+title: "new_0525"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidymodels)
+library(skimr)
+library(lubridate)
+library(timetk)
+library(recipes)
+library(modeltime)
+library(forecast)
+library(readr)
+
+```
+
+## Ulsan
+
+
+```{r}
+
+rdata2 <- read.csv("~/Documents/solar energy_dacon/rdata2_eng.csv")
+
+names(rdata2)
+skim(rdata2)
+
+rdata2 <- rdata2 %>%
+    mutate(time= ymd_hms(time))
+
+rdata2 %>% head()
+
+complete_prepared_tbl <- rdata2 %>%
+    filter(time >= ymd('2015-02-01') &
+               time < ymd('2021-02-01'))
+
+
+forecast_tbl <- rdata2 %>%
+    filter(time > ymd('2021-01-31'))
+
+splits <- time_series_split(rdata2, assess = "85 day", cumulative=TRUE)
+##Using date_var: time 
+
+rdata2 <- rdata2 %>%
+    mutate(ulsan=standardize_vec(ulsan))
+# 
+# Standardization Parameters
+# mean: 66.3113618827161
+# standard deviation: 104.187665325827
+
+
+
+
+```
+
+
+
+
+
+
+
+
+```{r}
+
+
+model_recipe <-
+    recipe(ulsan~., data=training(splits)) %>%
+    step_mutate_at(all_predictors(), -time, fn = as.numeric) %>%
+    step_normalize(all_predictors(), -time) %>%
+    step_date(time, features = 'month', ordinal = FALSE)  %>%
+    step_dummy(time_month)  %>%
+    prep()
+
+
+glimpse(model_recipe)
+
+model_fit_prophet <- prophet_reg(seasonality_daily = TRUE) %>%
+    set_engine(engine = "prophet")
+
+wflow_fit_prophet <- workflow() %>%
+    add_recipe(model_recipe) %>%
+    add_model(model_fit_prophet) %>%
+    fit(training(splits))
+
+
+# Disabling yearly seasonality. Run prophet with yearly.seasonality=TRUE to override this.
+# Disabling weekly seasonality. Run prophet with weekly.seasonality=TRUE to override this.
+# n.changepoints greater than number of observations. Using 3
+
+
+model_fit_nnetar <- nnetar_reg() %>%
+    set_engine('nnetar')
+
+
+wflw_fit_nnetar_boost <- workflow() %>%
+    add_recipe(model_recipe) %>%
+    add_model(model_fit_nnetar) %>%
+    fit(training(splits))
+
+# frequency = 24 observations per 1 day
+# Missing values in x, omitting rows
+
+
+```
+
+```{r}
+
+
+model_tbl <- modeltime_table(
+    wflow_fit_prophet,
+    wflw_fit_nnetar_boost
+)
+
+calibration_tbl <- model_tbl %>%
+    modeltime_calibrate(new_data = testing(splits))
+
+refit_tbl <- calibration_tbl %>%
+    modeltime_refit(data = complete_prepared_tbl)
+
+
+refit_tbl %>%
+    modeltime_forecast(
+        new_data=forecast_tbl,
+        actual_data=complete_prepared_tbl
+    ) %>%
+    mutate(across(.value, .fns = ~standardize_inv_vec(
+        x=.,
+        mean=66.3113618827161,
+        sd= 104.187665325827
+    ))) -> result_tbl
+
+
+
+```
+
+
+
+
+## Dangjin
+
+
+```{r}
+
+dangjin_data <- read.csv("~/Documents/solar energy_dacon/dangjin_JH_0522_eng.csv")
+
+dangjin_data <- dangjin_data %>%
+    select(-c("wind_speed","wind_direction","ground_tem",
+              "floating", "warehouse")) %>% 
+    mutate(time = ymd_hm(time))
+
+skim(dangjin_data)
+names(dangjin_data)
+
+
+dangjin_data <- dangjin_data %>%
+    mutate(dangjin = standardize_vec(dangjin))
+
+
+# Standardization Parameters
+# mean: 140.162687687688
+# standard deviation: 221.722546244936
+
+
+complete_prepared_dangjin_tbl <- dangjin_data %>%
+    filter(time >= ymd("2015-02-01") &
+               time < ymd("2021-02-01"))
+
+
+forecast_dangjin_tbl <- dangjin_data %>%
+    filter(time > ymd("2021-01-31"))
+
+
+splits_danjin <- time_series_split(dangjin_data, assess="85 day", cumulative = TRUE)
+
+
+```
+
+```{r}
+model_dangjin_recipe <-
+    recipe(dangjin~., data=training(splits_danjin)) %>%
+    step_mutate_at(all_predictors(), -time, fn=as.numeric) %>%
+    step_normalize(all_predictors(), -time) %>%
+    step_date(time, features="month", ordinal = FALSE) %>%
+    step_dummy(time_month)
+
+
+wflow_dangjin_prophet <- workflow() %>%
+    add_recipe(model_dangjin_recipe) %>%
+    add_model(model_fit_prophet) %>%
+    fit(training(splits_danjin))
+
+
+wflow_dangjin_nnetar_boost <- workflow() %>%
+    add_recipe(model_dangjin_recipe) %>%
+    add_model(model_fit_nnetar) %>%
+    fit(training(splits_danjin))
+
+
+# frequency = 24 observations per 1 day
+# Missing values in x, omitting rows
+
+
+model_dangjin_tbl <- modeltime_table(
+    wflow_dangjin_prophet,
+    wflow_dangjin_nnetar_boost
+)
+
+calibration_dangjin_tbl <- model_dangjin_tbl %>%
+    modeltime_calibrate(new_data=testing(splits_danjin))
+
+
+refit_dangjin_tbl <- calibration_dangjin_tbl %>%
+    modeltime_refit(data=complete_prepared_dangjin_tbl)
+
+
+refit_dangjin_tbl %>%
+    modeltime_forecast(
+        new_data=forecast_dangjin_tbl,
+        actual_data=complete_prepared_dangjin_tbl
+    ) %>%
+    mutate(across(.value, .fns=~standardize_inv_vec(
+        x=.,
+        mean=140.162687687688,
+        sd=221.722546244936
+    ))) -> result_dangjin_tbl
+    
+
+
+
+# mean: 140.162687687688
+# standard deviation: 221.722546244936
+
+
+
+```
+
+
+
+## floating
+
+```{r}
+
+floating_data <- read.csv("~/Documents/solar energy_dacon/dangjin_JH_0522_eng.csv")
+
+
+floating_data<- floating_data %>% 
+    select(-c("wind_speed", "wind_direction","ground_tem",
+             "dangjin", "warehouse")) %>%
+    mutate(time= ymd_hm(time))
+
+names(floating_data)
+skim(floating_data)
+
+
+
+floating_data <-floating_data %>%
+    mutate(floating = standardize_vec(floating))
+# 
+# Standardization Parameters
+# mean: 121.636138247484
+# standard deviation: 192.035457370168
+
+
+complete_prepared_floating_tbl <- floating_data %>%
+    filter(time >= ymd('2015-02-01') &
+               time < ymd('2021-02-01'))
+
+
+forecast_floating_tbl <- floating_data %>%
+    filter(time > ymd("2021-01-31"))
+
+
+splits_floating <- time_series_split(floating_data, assess="85 day", cumulative = TRUE)
+
+# Using date_var: time
+
+
+
+
+
+
+```
+
+
+```{r}
+model_floating_recipe <- 
+    recipe(floating~., data = training(splits_floating)) %>% 
+    step_mutate_at(all_predictors(), -time, fn = as.numeric) %>% 
+    step_normalize(all_predictors(), -time) %>%
+    step_date(time, features = 'month', ordinal = FALSE) %>% 
+    step_dummy(time_month) 
+
+
+
+wflow_floating_prophet <- workflow() %>%
+    add_recipe(model_floating_recipe) %>%
+    add_model(model_fit_prophet) %>%
+    fit(training(splits_floating))
+
+
+wflow_floating_nnetar_boost <- workflow() %>%
+    add_recipe(model_floating_recipe) %>%
+    add_model(model_fit_nnetar) %>%
+    fit(training(splits_floating))
+
+
+
+model_floating_tbl <- modeltime_table(
+    wflow_floating_prophet,
+    wflow_floating_nnetar_boost
+)
+
+
+calibration_floating_tbl <- model_floating_tbl %>%
+    modeltime_calibrate(new_data = testing(splits_floating)
+)
+
+
+
+refit_floating_tbl <- calibration_floating_tbl %>%
+    modeltime_refit(data= complete_prepared_floating_tbl)
+
+
+refit_floating_tbl %>%
+    modeltime_forecast(
+        new_data=forecast_floating_tbl, 
+        actual_data = complete_prepared_floating_tbl 
+    ) %>%
+    mutate(across(.value, .fns= ~standardize_inv_vec(
+        x=.,
+        mean=121.636138247484,
+        sd=192.035457370168
+    ))) ->result_floating_tbl
+
+
+
+
+
+
+```
+
+
+## warehouse
+
+
+```{r}
+
+warehouse_data <- read.csv("~/Documents/solar energy_dacon/dangjin_JH_0522_eng.csv")
+
+
+
+warehouse_data<- warehouse_data %>% 
+    select(-c("wind_speed", "wind_direction","ground_tem",
+             "dangjin", "floating")) %>%
+    mutate(time= ymd_hm(time))
+
+names(warehouse_data)
+skim(warehouse_data)
+
+
+
+warehouse_data <-warehouse_data %>%
+    mutate(warehouse = standardize_vec(warehouse))
+# 
+# Standardization Parameters
+# mean: 95.1885707844905
+# standard deviation: 150.328396015201
+
+
+complete_prepared_warehouse_tbl <- warehouse_data %>%
+    filter(time >= ymd('2015-02-01') &
+               time < ymd('2021-02-01'))
+
+
+forecast_warehouse_tbl <- warehouse_data %>%
+    filter(time > ymd("2021-01-31"))
+
+
+splits_warehouse <- time_series_split(warehouse_data, assess="85 day", cumulative = TRUE)
+
+# Using date_var: time
+
+
+
+
+
+```
+
+
+```{r}
+
+model_warehouse_recipe <- 
+    recipe(warehouse~., data = training(splits_warehouse)) %>% 
+    step_mutate_at(all_predictors(), -time, fn = as.numeric) %>% 
+    step_normalize(all_predictors(), -time) %>%
+    step_date(time, features = 'month', ordinal = FALSE) %>% 
+    step_dummy(time_month) 
+
+
+
+wflow_warehouse_prophet <- workflow() %>% 
+    add_recipe(model_warehouse_recipe) %>%
+    add_model(model_fit_prophet) %>%
+    fit(training(splits_warehouse)) 
+
+
+
+
+
+wflow_warehouse_nnetar_boost <- workflow() %>% 
+    add_recipe(model_warehouse_recipe) %>% 
+    add_model(model_fit_nnetar) %>% 
+    fit(training(splits_warehouse))
+
+
+
+```
+
+
+```{r}
+
+
+model_warehouse_tbl <- modeltime_table(
+  wflow_warehouse_prophet, 
+  wflow_warehouse_nnetar_boost
+)
+
+calibration_warehouse_tbl <- model_warehouse_tbl %>% 
+  modeltime_calibrate(new_data = testing(splits_warehouse))
+
+refit_warehouse_tbl <- calibration_warehouse_tbl %>% 
+    modeltime_refit(data = complete_prepared_warehouse_tbl) 
+
+
+
+
+refit_warehouse_tbl %>% 
+    modeltime_forecast(
+        new_data = forecast_warehouse_tbl, 
+        actual_data = complete_prepared_warehouse_tbl 
+    ) %>% 
+    mutate(across(.value, .fns = ~ standardize_inv_vec(
+        x = .,
+        mean = 95.1885707844905,
+        sd = 150.328396015201
+    ))) ->result_warehouse_tbl
+
+
+
+
+```
+
+
+
+```{r}
+
+write.csv(result_tbl, "result_tbl.csv")
+write.csv(result_floating_tbl, "result_floating_tbl.csv")
+write.csv(result_dangjin_tbl, "result_dangjin_tbl.csv")
+write.csv(result_warehouse_tbl, "result_warehouse_tbl.csv")
+
+
+
+
+```
+
+
+
+
+```{r}
+
+submission <- read.csv("~/Documents/solar energy_dacon/sample_submission.csv")
+
+
+result_tbl_file <- read.csv("~/Documents/solar energy_dacon/result_tbl.csv")
+result_dangjin_tbl_file <- read.csv("~/Documents/solar energy_dacon/result_dangjin_tbl.csv")
+result_floating_tbl_file <- read.csv("~/Documents/solar energy_dacon/result_floating_tbl.csv")
+result_warehouse_tbl_file <- read.csv("~/Documents/solar energy_dacon/result_warehouse_tbl.csv")
+
+result_tbl_file %>%
+  mutate(time = ymd_hms(.index))
+
+
+skim(result_tbl_file)
+
+# a<- result_tbl_file %>%
+#     dplyr::filter(.index>=  ("2021-02-01"))
+# 
+# 
+#  result_tbl_file %>% head()
+
+
+
+a <- result_tbl %>% # ulsan
+  filter(between(.index , ymd('2021-02-01'), ymd('2021-03-01'))) %>%
+  filter(.model_desc == 'NNAR(1,1,10)[24]', .key == 'prediction') %>%
+  select(.index, .value)
+
+distinct(result_tbl, .model_desc)
+
+
+
+b <- result_dangjin_tbl %>% # dangjin
+  filter(between(.index , ymd('2021-02-01'), ymd('2021-03-01'))) %>%
+  filter(.model_desc == 'NNAR(1,1,10)[24]', .key == 'prediction') %>%
+  select(.index, .value)
+# 
+# c <- result_floating_tbl %>% # floating
+#   filter(between(.index , ymd('2021-02-01'), ymd('2021-03-01'))) %>% 
+#   filter(.model_desc == 'NNAR(1,1,10)[24]', .key == 'prediction') %>% 
+#   select(.index, .value)
+#
+
+
+
+d <- result_warehouse_tbl %>% # warehouse
+  filter((.index>ymd('2021-01-31')&.index<('2021-03-01'))) %>%
+  filter(.model_desc == 'NNAR(1,1,10)[24]', .key == 'prediction') %>%
+  select(.index, .value)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
