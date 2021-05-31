@@ -1,0 +1,620 @@
+---
+title: "Data Preparation"
+author: "Jongjin Kim"
+date: '2021 5 28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center")
+```
+
+# Baseline (Week1 - Presented by Isaac Lee)
+
+이번 분석에서는 지난 주에 잡아둔 Baseline를 토대로 전처리 과정을 더하여 퍼포먼스를 올리는 것을 목표로 하였습니다.
+전처리 과정에서 퍼포먼스를 올리는 방법으로는 
+1. NA 값을 채우는 방법을 바꾼다. (Imputation Method), 2. predictors를 변환한다. (Transformation), 등의 방안이 있고, 전처리 이후에 모델을 선택하는 과정에서 또한 퍼포먼스를 올릴 수 있겠네요. 지난 주 분석에서는 ID를 제외하고, Sale_Price를 Log Transformation하고, Categorical은 Mode Impute, Numerical은 Mean Impute를 진행했었고, 마지막으로 모델은 LASSO 모델 (penalty 0.1 사용)을 통해 최종 모델을 결정했었습니다.
+
+## Load Libraries (라이브러리 불러오기)
+
+```{r load.lib, message = FALSE, warning = FALSE, results = 'hide'}
+# libraries
+library(tidymodels)            # a collection of packages for modeling : load multiple 'tidymodels' packages in a single step
+library(tidyverse)             # load multiple 'tidyverse' packages in a single step
+library(magrittr)              # includes "pipe" (%>%) operator
+library(skimr)                 # includes a function "skim" to skim the dataset
+library(knitr)                 # includes a function "purl" to convert RMD to R 
+library(naniar)                # includes functions to visualize and analyse NAs.
+theme_set(theme_bw())          # theme for ggplot2
+```
+
+## Load the dataset (데이터셋 불러오기)
+
+```{r, message = FALSE}
+# designate the file path. It matches to the kaggle RMD setting.
+
+# file path 
+# input   /
+# ...     / house-prices-advanced-regression-techniques/
+# ...     / ... / [train.csv, test.csv, data_description.txt, sample_submission.csv] 
+# output  /
+# yourcode/
+# ...     / [data_prep.RMD] 
+ 
+file_path <- "../input/house-prices-advanced-regression-techniques"
+
+# Retrieve the list of files in the path. 
+files <- list.files(file_path)
+
+# There are four files in the input folder
+files
+
+# Load the trainset 
+train <- read_csv(file.path(file_path, "train.csv"))
+
+# Load the testset
+test <- read_csv(file.path(file_path, "test.csv"))
+
+# Bind two dataset into "all_data" and clean variable names (turn into lower cases and delim with "_")
+all_data <- bind_rows(train, test) %>% 
+  janitor::clean_names()
+
+all_data %>% head()
+```
+
+## Recipe 1 (Baseline with Lasso Model)
+
+1. Set Target Variable as sale_price
+2. Remove id
+3. Log Transformation for sale_price (because it is right-skewed)
+4. Impute NAs with mode for all nominal variables (categorical variable)
+5. Create a dummy variable for all nominal variables (81 -> 246 variables)
+6. Impute NAs with mean for all other predictors (numerical variables)
+7. Normalize all predictors
+8. Prep.
+
+```{r}
+# Recipe for the tidymodels
+housing_recipe1 <- all_data %>% 
+    recipe(sale_price ~ .) %>%
+    step_rm(id) %>%
+    step_log(sale_price) %>%
+    step_impute_mode(all_nominal()) %>%
+    step_dummy(all_nominal()) %>%
+    step_impute_mean(all_predictors()) %>%
+    step_normalize(all_predictors()) %>%
+    prep()
+
+print(housing_recipe1) 
+```
+
+```{r}
+# Preprocess the recipe1
+all_data1 <- recipes::juice(housing_recipe1)
+```
+
+```{r}
+# Get the index for trainset
+train_index <- seq_len(nrow(train))
+
+# Get the pre-processed trainset
+train1 <- all_data1[train_index,]
+
+# Get the pre-processed testset
+test1 <- all_data1[-train_index,]
+```
+
+```{r message = FALSE, warning = FALSE}
+# Lasso model using glmnet engine with penalty 0.01 and mixture 1
+lasso_model1 <- 
+  linear_reg(penalty = 0.01, mixture = 1) %>%
+  set_engine("glmnet")
+
+# Run the model with formula sale_price ~ .(all other predictors) with dataset train1.
+lasso_fit1 <- 
+  lasso_model1 %>%
+  fit(sale_price ~ ., data = train1)
+
+# Find the estimates that are higher than 0.001.
+lasso_fit1 %>%
+  tidy() %>%
+  filter(abs(estimate) > 0.001) %>%
+  arrange(estimate %>% abs %>% desc)
+
+```
+
+```{r warning = FALSE}
+# Get the predicted values from the lasso model 1
+result1 <- predict(lasso_fit1, test1)
+result1 %>% head()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load the submission file
+submission <- read_csv(file.path(file_path, "sample_submission.csv"))
+
+# Exponential the sale_price because it is log transformed in preprocessing.
+submission$SalePrice <- exp(result1$.pred)
+
+# Write the submission file 
+write.csv(submission, row.names = FALSE,
+          "../output/lasso_regression_0point1.csv")
+```
+
+0.14193 (rank 5433)
+
+# Predictors used in the lasso model? 
+
+현재 LASSO 모델에서 영향을 크게 미치는 변수들을 찾아봤습니다.
+MS_SUB_CLASS 의 경우 범주형으로 보였는데, 모델에서는 Numeric으로 들어가 있는 상태이지만, 유의미한 estimate이 나오는 걸로 나오는게 신기하네요.
+NA의 비율이 많았던 범주형 변수들의 경우 LASSO 모델에서는 제외가 되었네요. 
+
+```{r}
+# Get the variables which have high estimates in the LASSO model
+vars <- lasso_fit1 %>%
+  tidy() %>%
+  filter(abs(estimate) > 0.001) %>%
+  dplyr::arrange(estimate %>% abs %>% desc)
+
+# Variables that have high estimate values 
+vars[1:10,]
+vars[11:20,]
+vars[21:30,]
+vars[31:40,]
+vars[41:50,]
+
+# NA dominants variables (pool_qc, fence, misc_feature, alley, fireplace_qu)
+
+lasso_fit1 %>% 
+  tidy() %>%
+  filter(stringr::str_starts(term, "pool_qc"))
+
+lasso_fit1 %>% 
+  tidy() %>%
+  filter(stringr::str_starts(term, "fence"))
+
+lasso_fit1 %>% 
+  tidy() %>%
+  filter(stringr::str_starts(term, "misc_feature"))
+
+lasso_fit1 %>% 
+  tidy() %>%
+  filter(stringr::str_starts(term, "alley"))
+
+lasso_fit1 %>% 
+  tidy() %>%
+  filter(stringr::str_starts(term, "fireplace_qu"))
+```
+
+# Preprocessing (전처리)
+
+```{r , message = FALSE, warning = FALSE}
+library(caret)
+
+# Select numeric data
+all_data_numeric <- all_data %>% 
+  select_if(is.numeric) %>% 
+  select(-"sale_price")
+
+# Select categorical data
+all_data_character <- all_data %>% select_if(is.character)
+
+# Find the missing value distribution
+all_data_numeric %>% naniar::gg_miss_var()
+
+# Find the missing value distribution
+all_data_numeric %>% naniar::gg_miss_upset()
+
+# lot_frontage : Linear feet of street connected to property
+# garage_yr_blt : the year when garage was built.
+
+# Get the data where there is a missing value in lot_frontage
+all_data_numeric %>% filter(is.na(lot_frontage))
+
+# Get the data where there is a missing value in garage_yr_blt
+all_data_numeric %>% filter(is.na(garage_yr_blt)) %>% .$garage_area
+
+all_data_numeric %>% filter(is.na(garage_yr_blt)) %>% .$garage_area %>% length()
+
+# Find the cases where year_built == garage_yr_blt
+all_data_numeric %>% 
+  mutate(isGarageBuilt = case_when(garage_yr_blt == year_built ~ TRUE, TRUE ~ FALSE)) %>% 
+  .$isGarageBuilt %>% 
+  sum(na.rm = TRUE)
+
+# Add the cases where year_remod_add == garage_yr_blt
+all_data_numeric %>%
+  mutate(isGarageBuilt = case_when(garage_yr_blt == year_built ~ TRUE, 
+                                   garage_yr_blt == year_remod_add ~ TRUE,
+                                   TRUE ~ FALSE)) %>% 
+  .$isGarageBuilt %>%
+  sum(na.rm = TRUE)
+
+# No patterns in year_built
+all_data_numeric %>% 
+  filter(garage_yr_blt != year_built) %>%
+  filter(garage_yr_blt != year_remod_add) %>% 
+  select(garage_yr_blt, year_built, year_remod_add)
+
+all_data_numeric %>% filter(is.na(garage_yr_blt)) %>% filter(garage_area != 0)
+
+all_data$garage_yr_blt[2127] <- all_data$year_built[2127]
+
+```
+
+## Box Cox Transformation
+현재 베이스라인에서는 타겟 변수인 Sale_Price에 대해서는 Log Transformation을 진행하여 Normality를 띠도록 만들었지만, 그 외의 Predictor들도 Normality를 띠도록 변경해줄 필요가 있습니다. 이를 위해 caret 패키지의 preProcess 함수를 사용하여 BoxCox Transformation을 진행하려고 합니다.
+BoxCox Transformation은 정규성을 띠지 않는 변수를 power transformation을 통하여 정규성을 띠도록 변경하는 과정인데요.
+링크 : [BoxCox Transformation](https://www.statisticshowto.com/box-cox-transformation/)
+이 과정에서 lambda라는 값이 주어지며, 간단하게는 lambda 값이 0이면, log transformation, lambda 값이 2이면 제곱, lambda 값이 0.5 이면 루트를 씌운다고 생각하면 됩니다. 
+
+```{r, warning = FALSE}
+# Apply mean imputation 
+all_data_numeric_meanimpute <- sapply(X = all_data_numeric,
+                                      FUN = impute_mean)
+
+# There is no negative data
+any(all_data_numeric_meanimpute < 0)
+
+# summary of numeric data
+summary(all_data_numeric)
+
+# Run the preprocess function
+BoxCox <- caret::preProcess(x = all_data_numeric_meanimpute,
+                            method = c("BoxCox", "center", "scale"))
+
+# See the overall result of preprocess 
+BoxCox
+
+# See the variables that needed to be transformed
+BoxCox$method
+
+# See the details of the BoxCox transformation
+BoxCox$bc
+
+# Unlist the boxcox results
+bc <- BoxCox$bc %>% unlist()
+
+# get index that have the name ending with lambda
+idx <- names(bc) %>% stringr::str_ends("lambda")
+
+# get the lambda result
+bc[idx]
+
+# it is close to 0 -> log transformation
+# it is close to 0.5 -> square root transformation
+# it is close to 2 -> square transformation
+
+# lot_area, x1st_flr_sf, gr_liv_area, tot_rms_abv_grd -> log transformation
+# lot_frontage -> square root transformation
+# garage_yr_blt, year_built -> square transformation
+```
+
+## Visualization of the variables that are needed to be transformed
+
+```{r, warning = FALSE}
+# This is a categorical (not ordinal)
+hist(all_data_numeric$ms_sub_class)  # Categorical
+
+# Histogram of lot_frontage
+hist(all_data_numeric$lot_frontage)  # Square root Transformation needed 
+
+ggplot(all_data_numeric, aes(x = lot_frontage, y = id)) + 
+  geom_point()
+
+all_data_numeric %>% filter(lot_frontage > 300)
+
+# Histogram of lot_area 
+hist(all_data_numeric$lot_area)      # Log-Transform needed
+
+ggplot(all_data_numeric, aes(x = lot_area, y = id)) + 
+  geom_point()
+
+all_data_numeric %>% filter(lot_area > 100000)
+
+# Histogram of overall_qual
+hist(all_data_numeric$overall_qual)  # No transform
+
+# Histogram of yr_sold
+hist(all_data_numeric$yr_sold)       # No transform
+
+# Histogram of year_built
+hist(all_data_numeric$year_built)    # Square Transform
+
+hist(2011 - all_data_numeric$year_built)    # Log-Transform
+
+# Histogram of year_remod_add
+hist(all_data_numeric$year_remod_add) # Square Transform
+
+# Histogram of 1st floor surface
+hist(all_data_numeric$x1st_flr_sf)    # Log Transform
+
+ggplot(data = all_data_numeric) + 
+  aes(x = x1st_flr_sf, y = id) +
+  geom_point()
+
+all_data_numeric %>% filter(x1st_flr_sf > 3500)
+
+# Big houses
+all_data_numeric[c(1299,2189,2550),]
+
+# Histogram of ground living area
+hist(all_data_numeric$gr_liv_area)     
+
+# gr_liv_area = x1st_flr_sf + x2nd_flr_sf + low_qual_fin_sf : redundant in linear model 
+identical(all_data_numeric$x1st_flr_sf + all_data_numeric$x2nd_flr_sf + all_data_numeric$low_qual_fin_sf, all_data_numeric$gr_liv_area)
+
+# Histogram of total rooms above ground
+hist(all_data_numeric$tot_rms_abv_grd)
+
+# Histogram of garage_yr_built
+hist(all_data_numeric$garage_yr_blt)
+
+ggplot(data = all_data_numeric) + 
+  aes(x = garage_yr_blt, y = id) +
+  geom_point() 
+
+all_data_numeric %>% 
+  filter(garage_yr_blt > 2200) %>% 
+  select(id, year_built, year_remod_add, garage_yr_blt)
+
+all_data[2593,]$garage_yr_blt <- 2007 
+
+# Histogram of mo_sold
+hist(all_data_numeric$mo_sold)
+```
+
+# Recipe 2 (Transformation for numerical variables)
+
+1. Set Target Variable as sale_price
+2. Remove id
+3. Log Transformation for sale_price (because it is right-skewed)
+4. Impute NAs with mean for all numerical predictors
+5. Run BoxCox Transformation for all numerical predictors
+6. Normalize all numerical predictors
+7. Impute NAs with mode for all nominal predictors
+8. Create a Dummy variables for nominal predictors
+9. Prep.
+
+```{r}
+# Recipe for the tidymodels
+housing_recipe2 <- all_data %>% 
+    recipe(sale_price ~ .) %>%
+    step_rm(id) %>%
+    step_log(sale_price) %>%
+    step_impute_mean(all_numeric_predictors()) %>%
+    step_BoxCox(all_numeric_predictors()) %>%
+    step_normalize(all_numeric_predictors()) %>%
+    step_impute_mode(all_nominal()) %>%
+    step_dummy(all_nominal()) %>%
+    prep()
+
+print(housing_recipe2) 
+```
+
+```{r}
+# Preprocess the recipe1
+all_data2 <- recipes::juice(housing_recipe2)
+```
+
+```{r}
+# Get the index for trainset
+train_index <- seq_len(nrow(train))
+
+# Get the pre-processed trainset
+train2 <- all_data2[train_index,]
+
+# Get the pre-processed testset
+test2 <- all_data2[-train_index,]
+```
+
+```{r message = FALSE, warning = FALSE}
+# Lasso model using glmnet engine with penalty 0.01 and mixture 1
+lasso_model2 <- 
+  linear_reg(penalty = 0.01, mixture = 1) %>%
+  set_engine("glmnet")
+
+# Run the model with formula sale_price ~ .(all other predictors) with dataset train1.
+lasso_fit2 <- 
+  lasso_model2 %>%
+  fit(sale_price ~ ., data = train2)
+
+# Find the estimates that are higher than 0.001.
+lasso_fit2 %>%
+  tidy() %>%
+  filter(abs(estimate) > 0.001)
+```
+
+```{r warning = FALSE}
+# Get the predicted values from the lasso model 1
+result2 <- predict(lasso_fit2, test2)
+result2 %>% head()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load the submission file
+submission <- read_csv(file.path(file_path, "sample_submission.csv"))
+
+# Exponential the sale_price because it is log transformed in preprocessing.
+submission$SalePrice <- exp(result2$.pred)
+
+# Write the submission file 
+write.csv(submission, row.names = FALSE,
+          "../output/lasso_regression_0point2.csv")
+```
+
+0.13426 (Rank 4117)
+
+# Recipe 3 (Using Median Imputation)
+
+1. Set Target Variable as sale_price
+2. Remove id
+3. Log Transformation for sale_price (because it is right-skewed)
+4. Impute NAs with *Median* for all numerical predictors
+5. Run BoxCox Transformation for all numerical predictors
+6. Normalize all numerical predictors
+7. Impute NAs with mode for all nominal predictors
+8. Create a Dummy variables for nominal predictors
+9. Prep.
+
+```{r}
+# Recipe for the tidymodels
+housing_recipe3 <- all_data %>% 
+    recipe(sale_price ~ .) %>%
+    step_rm(id) %>%
+    step_log(sale_price) %>%
+    step_impute_median(all_numeric_predictors()) %>%
+    step_BoxCox(all_numeric_predictors()) %>%
+    step_normalize(all_numeric_predictors()) %>%
+    step_impute_mode(all_nominal()) %>%
+    step_dummy(all_nominal()) %>%
+    prep()
+
+print(housing_recipe3) 
+```
+
+```{r}
+# Preprocess the recipe1
+all_data3 <- recipes::juice(housing_recipe3)
+```
+
+```{r}
+# Get the index for trainset
+train_index <- seq_len(nrow(train))
+
+# Get the pre-processed trainset
+train3 <- all_data3[train_index,]
+
+# Get the pre-processed testset
+test3 <- all_data3[-train_index,]
+```
+
+```{r message = FALSE, warning = FALSE}
+# Lasso model using glmnet engine with penalty 0.01 and mixture 1
+lasso_model3 <- 
+  linear_reg(penalty = 0.01, mixture = 1) %>%
+  set_engine("glmnet")
+
+# Run the model with formula sale_price ~ .(all other predictors) with dataset train1.
+lasso_fit3 <- 
+  lasso_model3 %>%
+  fit(sale_price ~ ., data = train3)
+
+# Find the estimates that are higher than 0.001.
+lasso_fit3 %>%
+  tidy() %>%
+  filter(abs(estimate) > 0.001)
+```
+
+```{r warning = FALSE}
+# Get the predicted values from the lasso model 1
+result3 <- predict(lasso_fit3, test3)
+result3 %>% head()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load the submission file
+submission <- read_csv(file.path(file_path, "sample_submission.csv"))
+
+# Exponential the sale_price because it is log transformed in preprocessing.
+submission$SalePrice <- exp(result3$.pred)
+
+# Write the submission file 
+write.csv(submission, row.names = FALSE,
+          "../output/lasso_regression_0point3.csv")
+```
+
+0.13435 (Recipe 2 is better)
+
+# Recipe 4 ( ms_sub_class into categorical variable) 
+
+1. Set Target Variable as sale_price
+2. Remove id
+3. Log Transformation for sale_price (because it is right-skewed)
+4. Impute NAs with mean for all numerical predictors
+5. Run BoxCox Transformation for all numerical predictors
+6. Normalize all numerical predictors
+7. Impute NAs with mode for all nominal predictors
+8. Create a Dummy variables for nominal predictors
+9. Prep.
+
+
+```{r}
+# Remove NA dominant variables (pool_qc, fence, misc_feature, alley, id)
+all <- all_data %>% 
+  select(-c(pool_qc, fence, misc_feature, alley, id)) %>% 
+  mutate_if(is.character, as.factor) %>% # Character -> Factor
+  mutate(
+    ms_sub_class = as.factor(ms_sub_class), # MSSubClass는 범주형 변수이므로 factor로 변환
+    overall_qual = factor(overall_qual, order = T, levels = c(1,2,3,4,5,6,7,8,9,10)),
+    overall_cond = factor(overall_cond, order = T, levels = c(1,2,3,4,5,6,7,8,9,10)))
+```
+
+```{r}
+# Recipe for the tidymodels
+housing_recipe4 <- all %>% 
+    recipe(sale_price ~ .) %>%
+    step_log(sale_price) %>%
+    step_impute_mean(all_numeric_predictors()) %>%
+    step_BoxCox(all_numeric_predictors()) %>%
+    step_impute_mode(all_nominal()) %>%
+    step_dummy(all_nominal()) %>%
+    step_normalize(all_predictors()) %>%
+    prep()
+
+print(housing_recipe4) 
+```
+
+```{r}
+# Preprocess the recipe4
+all_data4 <- recipes::juice(housing_recipe4)
+```
+
+```{r}
+# Get the index for trainset
+train_index <- seq_len(nrow(train))
+
+# Get the pre-processed trainset
+train4 <- all_data4[train_index,]
+
+# Get the pre-processed testset
+test4 <- all_data4[-train_index,]
+```
+
+```{r message = FALSE, warning = FALSE}
+# Lasso model using glmnet engine with penalty 0.01 and mixture 1
+lasso_model4 <- 
+  linear_reg(penalty = 0.01, mixture = 1) %>%
+  set_engine("glmnet")
+
+# Run the model with formula sale_price ~ .(all other predictors) with dataset train1.
+lasso_fit4 <- 
+  lasso_model4 %>%
+  fit(sale_price ~ ., data = train4)
+
+# Find the estimates that are higher than 0.001.
+lasso_fit4 %>%
+  tidy() %>%
+  filter(abs(estimate) > 0.001)
+```
+
+```{r warning = FALSE}
+# Get the predicted values from the lasso model 4
+result4 <- predict(lasso_fit4, test4)
+result4 %>% head()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load the submission file
+submission <- read_csv(file.path(file_path, "sample_submission.csv"))
+
+# Exponential the sale_price because it is log transformed in preprocessing.
+submission$SalePrice <- exp(result4$.pred)
+
+# Write the submission file 
+write.csv(submission, row.names = FALSE,
+          "../output/lasso_regression_0point4.csv")
+```
+
+0.13435
