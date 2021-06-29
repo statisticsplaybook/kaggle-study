@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Introduction to Tidymodels</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Issac Lee" />
+    <script src="libs/header-attrs-2.8.1/header-attrs.js"></script>
+    <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
+    <link rel="stylesheet" href="css/statisticsplaybook.css" type="text/css" />
+    <link rel="stylesheet" href="css/statisticsplaybook-fonts.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+
+
+
+
+class: title-slide, left, bottom
+
+# Introduction to Tidymodels
+----
+## **Aimes house data**
+### Issac Lee
+### May, 20, 2021
+
+---
+class: inverse, middle, center
+
+# Tidymodels란 무엇인가
+
+&lt;img src="https://raw.githubusercontent.com/rstudio/hex-stickers/master/SVG/tidymodels.svg" width="30%" style="display: block; margin: auto;" /&gt;
+
+---
+
+# Tidymodels
+
+.left-column[
+## 구성
+]
+.right-column[
+## 5개의 패키지로 구성이 되어있음.
+
+* rsample: 데이터를 나누는거나 샘플링할 때 사용
+
+* recipes: 전처리를 담당함.
+
+* parsnip: 모델의 정보를 사용하여 간단하게 모델을 만들 수 있도록 해줌.
+
+* tune: 모델 패러미터 학습에 사용.
+
+* yardstick: 모델 성능을 평가하는 지표 설정에 사용.
+
+* stacks: 여러 모델들을 스택킹을 할 수 있게끔 해 줌.
+
+]
+
+---
+# Schematic of model building
+
+&lt;img src="https://www.tmwr.org/premade/modeling-process.svg" width="100%" style="display: block; margin: auto;" /&gt;
+
+---
+# Terminology
+
+.left-column[
+## 용어설명
+]
+.right-column[
+### Exploratory data analysis (EDA)
+
+* 통계지표를 활용한 데이터 특성 이해
+
+* 시각화를 통한 데이터 특성 이해
+
+### Feature engineering
+
+* EDA를 통한 정보를 활용하여 모델에 들어가는 입력값들을 생성
+
+### Model tuning and selection
+
+* 모델 패러미터를 결정
+
+### Model evaluation
+
+* 모델의 성능 (예측력)을 평가함.
+
+]
+
+---
+# Ames housing data
+
+.left-column[
+## 대회 정보 및 데이터 정보
+]
+.right-column[
+현재 캐글에서 공부용 대회를 진행 중.
+
+* 대회 링크: https://www.kaggle.com/c/house-prices-advanced-regression-techniques
+
+* 회귀문제: 집값을 예측하는 문제
+
+#### Data info.
+
+* 집의 특징 - 방의 갯수, 시설 (벽난로, 수영장 유무 등), 크기, 위치
+
+* 평가 점수
+
+* **가격** - 예측을 해야하는 target variable
+
+]
+
+---
+# R을 사용한 캐글링 준비
+
+.left-column[
+## Kaggle.blue[R]
+]
+.right-column[
+Kaggle은 R을 상대적으로 잘 지원해주지 않고 있음.
+
+### Rmd 파일을 사용한 코드 작성
+
+캐글에서는 R 노트북 환경(ipython 기반)을 제공하고 있음.
+
+.pull-left[
+
+- 캐글에서 바로 작성 가능
+
+- 캐글에서 제공하는 컴퓨터 환경을 사용
+
+]
+.pull-right[
+
+- auto completion이 제공 안 됨.
+- 생산성 급격히 감소
+- 재미 반감 `\(\rightarrow\)` 그만둠
+
+]
+  
+### .red[**`Rmd`라는 강력한 도구**]가 있는데, 안쓰는 것은 오른손 잡이가 왼손으로 글씨를 쓰는 셈.
+
+]
+
+---
+# 캐글 Rmd 기능
+
+캐글에서 제공하는 Rmd 기능.
+
+.left-column[
+## R마크다운
+]
+.right-column[
+### 최대 단점
+
+1. knitting 하는데 너무 부울편
+2. chunk별 플랏을 볼 수 없음.
+
+### 대안책
+
+1. 캐글 노트북 환경을 그대로 로컬 컴퓨터로 옮겨온다.
+1. 로컬에서 Rmd 파일을 작성 (Rstudio 기능을 최대로 활용)
+1. 완성이 된 Rmd 파일을 캐글에 업로드 후, 저장 &amp; Run.
+1. 한글 toc 작동안 됨.
+]
+
+---
+# 로컬에서 .blue[Kaggle] 하기
+
+.left-column[
+## 폴더 구조
+]
+.right-column[
+* `input` 폴더는 캐글의 데이터 구조를 그대로 복사
+
+* yourcode 폴더안의 `Rmd`로 작업.
+
+
+```r
++---input
+|   \---house-prices-advanced-regression-techniques
+|           data_description.txt
+|           sample_submission.csv
+|           test.csv
+|           train.csv
+|           
+\---yourcode
+        glmnet-baseline.Rmd
+```
+
+]
+
+---
+class: inverse, middle, center
+
+# House Prices 대회
+# 베이스라인 잡기
+
+## .red[Demo]
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false,
+"ratio": "16:9"
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+<!--Hat-tip: https://www.garrickadenbuie.com/blog/xaringan-tip-logo-all-slides/-->
+<style>
+.logo {
+  background-image: url(img/logo-blue.png);
+  background-size: contain;
+  background-repeat: no-repeat;
+  position: absolute;
+  top: 1em;
+  right: 1em;
+  width: 110px;
+  height: 128px;
+  z-index: 0;
+}
+</style>
+
+<script>
+document
+  .querySelectorAll(
+    '.remark-slide-content' +
+    ':not(.title-slide)' +
+    // add additional classes to exclude here, e.g.
+    ':not(.inverse)' +
+    ':not(.hide-logo)'
+  )
+  .forEach(el => {
+    el.innerHTML += '<div class="logo"></div>';
+  });
+</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

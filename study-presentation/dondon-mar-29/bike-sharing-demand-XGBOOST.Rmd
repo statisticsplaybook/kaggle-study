@@ -1,0 +1,365 @@
+---
+title: "XGBOOST with Tidymodels"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center")
+```
+
+
+
+# Preparations (준비작업) {.tabset .tabset-fade}
+
+## Libraries
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+library(tidymodels)
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(magrittr)
+library(data.table)
+library(gridExtra)
+
+theme_set(theme_bw())
+```
+
+## Data load
+
+```{r}
+file_path <- "../input/bike-sharing-demand/"
+files <- list.files(file_path)
+files
+```
+
+```{r, message=FALSE}
+train <- read_csv(file.path(file_path, "train.csv"))
+test <- read_csv(file.path(file_path, "test.csv"))
+```
+
+# Data overview (데이터 기본정보) {.tabset .tabset-fade}
+
+## train data 
+```{r}
+head(train)
+skim(train)
+```
+
+## test data
+```{r}
+head(test)
+skim(test)
+```
+
+
+# 데이터 전처리 {.tabset .tabset-fade}
+
+## 변수 제거 
+```{r}
+train %>% 
+    select(-c(casual, registered)) -> train
+```
+
+train data에는 casual, registered 변수가 존재하지만 test 데이터에는 존재하지 않음. 따라서 두 변수를 제외함. train data를 이용해서 test 데이터에 존재하지 않는 변수를 채우는 방법도 고려해볼 필요가 있음. 
+
+## train, test 데이터 통합 
+```{r}
+all_data <- bind_rows(train, test)
+```
+
+## 변수 속성 변경
+```{r}
+all_data$season <- factor(all_data$season, labels = c('winter', 'fall', 'summer', 'spring'))
+all_data$weather <- as.factor(all_data$weather)
+all_data$workingday <- as.factor(all_data$workingday)
+all_data$holiday <- as.factor(all_data$holiday)
+```
+
+## 날짜 변수 생성 
+```{r}
+all_data %>% mutate(year = year(datetime), 
+                    month = month(datetime),
+                    wday = wday(datetime),
+                    day = day(datetime), 
+                    hour = hour(datetime)) %>% 
+    select(year, month, wday, day, holiday, workingday, everything()) -> all_data
+all_data
+```
+
+## wday, month factor로 변환 
+```{r}
+all_data$wday <- factor(all_data$wday, labels = c('Sun', 'Mon', 'Tue', 'Wed', 'Thur', 'Fri', 'Sat'))
+all_data$month <- as.factor(all_data$month)
+all_data
+```
+
+# 일변량 데이터 시각화 {.tabset .tabset-fade}
+
+## count(target variable) 분포 
+```{r, message=FALSE, warning=FALSE}
+all_data %>% 
+    ggplot(aes(x = count)) + 
+    geom_histogram()
+```
+count 변수를 보면 0인 count가 많음 
+
+
+## atemp, temp 분포 
+```{r, warning=FALSE, message=FALSE}
+p1 <- all_data %>% 
+    ggplot(aes(x = atemp)) + 
+    geom_histogram()
+p2 <- all_data %>% 
+    ggplot(aes(x = temp)) + 
+    geom_histogram()
+
+grid.arrange(grobs = list(p1, p2), col = 2)
+```
+temp, atemp 분포는 거의 비슷함 
+
+
+## 변수별 상관관계 및 분포 시각화(holiday) 
+```{r}
+all_data %>% 
+    select(holiday, temp, humidity, windspeed, count) %>% 
+    GGally::ggpairs(mapping = aes(color = holiday))
+```
+
+## 변수별 상관관계 및 분포 시각화(workingday)
+```{r}
+all_data %>% 
+    select(workingday, temp, humidity, windspeed, count) %>% 
+    GGally::ggpairs(mapping = aes(color = workingday))
+```
+
+# factor 변수 시각화 {.tabset .tabset-fade}
+
+## 계절(season)에 따른 시간 vs count 그래프 
+```{r}
+all_data %>% 
+    group_by(season, hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count, color = season)) +
+    geom_line(size = 1.5, alpha = 0.7)
+```
+
+## 날씨(weather)에 따른 시간 vs count 그래프
+```{r}
+all_data %>% 
+    group_by(weather, hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count, color = weather)) +
+    geom_line(size = 1.5, alpha = 0.7)
+```
+
+## 요일(wday)에 따른 시간 vs count 그래프
+```{r}
+all_data %>% 
+    group_by(wday, hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count, color = wday)) +
+    geom_line(size = 1.5, alpha = 0.7)
+```
+
+## 휴일 유무(holiday)에 따른 시간 vs count 그래프
+```{r}
+all_data %>% 
+    group_by(holiday, hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count, color = holiday)) +
+    geom_line(size = 1.5, alpha = 0.7)
+```
+
+## workingday에 따른 시간 vs count 그래프
+```{r}
+all_data %>% 
+    group_by(workingday, hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count, color = workingday)) +
+    geom_line(size = 1.5, alpha = 0.7)
+```
+
+## month에 따른 시간 vs count 그래프
+```{r}
+all_data %>% 
+    group_by(month, hour) %>% 
+    summarise(count = sum(count, na.rm = T)) %>% 
+    ggplot(aes(x = hour, y = count, color = month)) +
+    geom_line(size = 1.5, alpha = 0.7)
+```
+
+
+
+# Recipe + preperation {.tabset .tabset-fade}
+
+```{r}
+bike_res <- all_data %>% 
+    recipe(count~.) %>% 
+    step_rm(datetime, year) %>% 
+    # step_downsample() : category 변수의 level에서 빈도가 가장 낮은 level로 변환 
+    # step_boxCox(all_numeric()) : boxcox transformation : 분포의 정규성 맞춰줌  
+    # step_smote() : category level 빈도가 불균형일 때 
+    step_log(count, offset = 1) %>% 
+    step_dummy(all_nominal()) %>% 
+    step_nzv(all_numeric()) %>% 
+    #step_YeoJohnson(all_numeric(), -all_outcomes()) %>% : boxcox와 비슷 
+    #step_normalize(all_numeric(), -all_outcomes()) %>% 
+    prep(training = all_data)
+    
+```
+
+
+# Juice {.tabset .tabset-fade} 
+
+```{r}
+all_data2 <- juice(bike_res)
+```
+
+# train, test 나누기 {.tabset .tabset-fade}
+```{r}
+train_index <- seq_len(nrow(train))
+train2 <- all_data2[train_index,]
+test2 <- all_data2[-train_index,]
+```
+
+
+# XGboost setting {.tabset .tabset-fade}
+
+## XGBOOST hyperparameter 세팅 
+```{r}
+xgb_spec <- boost_tree(
+    trees = 1000, # 앙상블에 포함되는 tree의 수 
+    tree_depth = tune(), # 얼마만큼 노드를 split할건지 
+    min_n = tune(), # 노드를 분할하는데 필요한 최소 데이터의 수
+    loss_reduction = tune(), # 노드 분할에 필요한 loss의 감소량 
+    sample_size = tune(), # The amount of data exposed to the fitting routine
+    mtry = tune(), # The number of predictors that will be randomly sampled at each split when creating the tree models. 
+    learn_rate = tune() 
+) %>% 
+    set_engine('xgboost', objective = "reg:squarederror") %>% 
+    set_mode('regression')
+```
+
+
+## Grid search 
+```{r}
+xgb_grid <- grid_latin_hypercube(
+    tree_depth(), 
+    min_n(), 
+    loss_reduction(), 
+    sample_size = sample_prop(), 
+    finalize(mtry(), train2), # mtry() : [1, ?], finalize(mtry(), train2) : [1, 30]
+    learn_rate(), 
+    size = 30
+)
+```
+
+# XGboost workflow {.tabset .tabset-fade}
+
+## workflow에 모델 세팅 
+```{r}
+xgb_wf <- workflow() %>% 
+    add_formula(count~.) %>% 
+    add_model(xgb_spec)
+
+```
+
+
+## 교차검증 데이터 세팅(cross validation) 
+```{r}
+set.seed(1234)
+vb_folds <- vfold_cv(train2, v = 5, strata = count)
+vb_folds
+```
+
+
+## hyperparameter 튜닝 
+```{r}
+library(tictoc)
+tic()
+doParallel::registerDoParallel()
+set.seed(1234)
+
+xgb_res <- tune_grid(
+    xgb_wf, # recipe, formula를 지정해준 workflow 
+    resamples = vb_folds, 
+    grid = xgb_grid, # grid_latin_hypercube
+    control = control_grid(save_pred = TRUE) # out of sample predicton 값 저장. test data에 fitting 한 뒤에 collect_prediction()으로 예측값을 확인할 때 사용됨. classification 문제에서는 roc curve를 그리는데에도 활용됨   
+)
+toc()  
+```
+
+## Final 모델 workflow에 세팅
+```{r}
+best_param <- select_best(xgb_res, 'rmse')
+final_xgb <- finalize_workflow(xgb_wf, best_param)
+final_xgb
+```
+
+## final 모델 세팅
+```{r}
+final_model <- finalize_model(xgb_spec, best_param) 
+final_model # tuning이 끝난 최종 모형 
+```
+
+## final model workflow에 업데이트  
+```{r}
+final_workflow <- xgb_wf %>% update_model(final_model)
+```
+
+## final model 학습 
+```{r}
+xgb_fit <- fit(final_workflow, data = train2)
+```
+
+
+# 모델 학습 결과 {.tabset .tabset-fade}
+
+## 변수 중요도 그림(feature importance plot)
+```{r}
+library(vip) # feature importance plot 그리기 
+final_xgb %>% 
+    fit(data = train2) %>%  # iter, training_rmse 
+    pull_workflow_fit() %>% #  http://www.rebeccabarter.com/blog/2020-03-25_machine_learning/
+    vip(geom = 'point')
+```
+
+## 모델 예측값 산출 
+```{r}
+pred_xgb <- 
+    predict(xgb_fit, test2) %>% 
+    mutate(modelo = "XGBoost")
+
+pred_xgb$.pred <- exp(pred_xgb$.pred)+1
+```
+
+## 변수 중요도 그림(feature importance plot)
+```{r}
+library(vip) # feature importance plot 그리기 
+final_xgb %>% 
+    fit(data = train2) %>%  # iter, training_rmse 
+    pull_workflow_fit() %>% #  http://www.rebeccabarter.com/blog/2020-03-25_machine_learning/
+    vip(geom = 'point')
+```
+
+# 파일 제출 {.tabset .tabset-fade}
+```{r}
+subfile <- read_csv(file.path(file_path, "sampleSubmission.csv")
+subfile$count <- exp(pred_lasso$.pred) + 1
+
+write.csv(subfile, row.names = FALSE,
+          file.path(file_path, "xgb_Submission.csv") 
+```
+
+

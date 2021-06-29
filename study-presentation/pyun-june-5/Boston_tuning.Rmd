@@ -1,0 +1,446 @@
+---
+title: "Boston housing 발표용1"
+author: "doyeon"
+date: '2021 6 3'
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center")
+```
+# 발표 개요  
+1. 여러 parsnip 모델 및 튜닝 정리
+2. 성능 향상을 위한 시도  
+  -Feature Selection : A Practical Approach for Predictive Models(Max Kuhn and Kjell Johnson,https://bookdown.org/max/FES/) 적용  
+  
+## 1. 여러 parsnip 모델 및 튜닝 정리
+
+## Load Libraries
+```{r message=FALSE, warning=FALSE, results='hide'}
+library(data.table)
+library(tidyverse)
+library(tidymodels)
+library(janitor)
+library(stacks)
+library(vip)
+library(knitr)
+```
+
+## Load the dataset
+```{r}
+train <- fread("./BostonHousing/train.csv",header=T) %>% 
+  clean_names()
+test <- fread("./BostonHousing/test.csv",header=T) %>% 
+  clean_names()
+test$sale_price <- NA
+```
+## Recipe - Preprocessing
+```{r}
+set.seed(123)
+housing_rec <- train %>% 
+    recipe(sale_price~.) %>% 
+    step_rm(id) %>% 
+    step_log(sale_price) %>% 
+    step_impute_median(all_numeric(),-all_outcomes()) %>% 
+    step_impute_mode(all_nominal()) %>% 
+    step_BoxCox(all_numeric(),-all_outcomes()) %>% 
+    step_normalize(all_numeric(),-all_outcomes()) %>% 
+    step_dummy(all_nominal()) %>%
+    prep()
+
+#데이터 준비
+train2 <- housing_rec %>% juice()
+test2 <- bake(housing_rec,test)
+```
+
+#### 1-1)linear model(lasso) - basic model
+```{r}
+set.seed(123)
+#Set lasso model
+lasso_mod <- 
+  linear_reg(penalty = 0.01,
+             mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet")
+
+#workflow 생성
+lasso_wf <- 
+  workflow() %>% 
+  add_model(lasso_mod) %>% 
+  add_formula(sale_price~.)
+
+#Model fitting
+lasso_fit <- 
+  lasso_wf %>% 
+  fit(train2)
+
+#predict with test_data
+lasso_pred <- predict(lasso_fit,new_data = test2) %>% exp()
+head(lasso_pred)
+#제출 결과
+#0.13365
+```
+  
+## Hyperparameters tuning  
+-Three main methods to tune/optimize hyperparameters:  
+1.Random Search method:  
+- the grid is randomly selected. This method is faster at getting reasonable model but will not get the best in your grid.  
+- 가장 빠름. grid 범위 지정 필요 . 성능 보장 x   
+2.Grid Search method:   
+- an exhaustive search over a manually specified subset of the hyperparameter space. This method is a computationally expensive option but guaranteed to find the best combination in your specified grid.  
+- random search 보다 느림. 성능 좋음. 여전히 grid 범위 지정 필요. tune_grid()  
+***3.***Informed Search method -  Bayesian Optimization :  
+- In informed search, each iteration learns from the last, the results of one model helps creating the next model.  
+- grid 지정 필요 X, 성능 좋음  
+4. Adaptive Resampling method in {caret}:  
+- This method resamples the hyperparameter combinations with values near combinations that performed well. This method is faster and more efficient.  
+- 성능 가장 좋음. Tidymodels에 없다(아마)  
+
+#### 1-2)linear model - tuning model  
+```{r}
+set.seed(123)
+#Set linear model for tuning
+linear_tuning_mod <- 
+    linear_reg(penalty = tune(),
+               mixture = tune()) %>% 
+    set_mode("regression") %>% 
+    set_engine("glmnet")
+
+#튜닝할 파라미터 생성
+linear_tuning_params <- parameters(linear_tuning_mod) %>% 
+    finalize(train2)
+
+#tuning workflow 생성
+linear_tuning_wf <- 
+    workflow() %>% 
+    add_model(linear_tuning_mod) %>% 
+    add_formula(sale_price~.)
+
+#데이터 샘플링 방법 지정  - "CV", 일반적으로 분할 5~10 지정.
+data_folds1 <- vfold_cv(train2,v=10,strata = sale_price)
+
+#Optimise with tune_bayes
+linear_tuned <- tune_bayes(
+    object = linear_tuning_wf,
+    resamples = data_folds1,
+    param_info = linear_tuning_params,
+    iter = 10, #iteration 지정
+    metrics = metric_set(rmse), #metrics 지정
+#    initial = 10, #최소 몇번 iter 진행할지 지정 with no_improve
+    control = control_bayes(
+        verbose = F, #튜닝 과정 보기
+#        no_improve = 5, #성능 발전이 5 iter 동안 없으면 튜닝 종료
+        save_pred = T,
+        save_workflow = T
+    )
+)
+#튜닝 결과 다양하게 확인하기
+#1)시각화
+linear_tuned %>% 
+  show_best(metric = "rmse", n = 10) %>% 
+  pivot_longer(penalty:mixture, names_to="variable", values_to="value" ) %>% 
+  ggplot(aes(value, mean)) + 
+  geom_line()+ 
+  geom_point()+ 
+  facet_wrap(~variable,scales = "free")
+
+#2)mixture
+linear_tuned %>%
+  collect_metrics() %>%
+  ggplot(aes(mixture, mean, color = mixture)) +
+  geom_point()
+
+#3)penalty
+linear_tuned %>%
+  collect_metrics() %>%
+  ggplot(aes(penalty, mean, color = penalty)) +
+  geom_point()
+
+#4)
+linear_tuned %>% 
+  collect_metrics() %>% 
+  arrange(desc(mean))
+
+#rmse가 가장 좋은 모델을 튜닝 결과에서 선택하여 저장.
+linear_best_model <- linear_tuned %>% 
+  select_best("rmse")
+
+#best 튜닝 모델을 기존 workflow에 적용
+linear_final_wf <- linear_tuning_wf %>% 
+  finalize_workflow(linear_best_model)
+
+#tuning model fitting
+linear_final_fit <- linear_final_wf %>% 
+  fit(train2)
+
+#predict test_data
+linear_tuning_pred <- predict(linear_final_fit,new_data = test2) %>% exp()
+head(linear_tuning_pred)
+#0.12941 > 성능향상!
+```
+
+#### Decision tree - basic model(생략)
+```{r eval = F}
+tree_mod <- 
+  decision_tree() %>% 
+  set_mode("regression") %>% 
+  set_engine("rpart")
+
+tree_wf <- 
+  workflow() %>% 
+  add_model(tree_mod) %>% 
+  add_formula(sale_price~.)
+
+tree_fit <- 
+  tree_wf %>% 
+  fit(train2)
+
+tree_pred <- predict(tree_fit,new_data = test2) %>% exp()
+```
+
+
+#### 2-1)Random Forest - basic model
+```{r}
+set.seed(125)
+rf_mod <- 
+    rand_forest() %>% 
+    set_mode("regression") %>% 
+    set_engine("ranger", importance = 'impurity') 
+#importance = "impurity" , "permutation" 설정해야 vip() 가능
+
+rf_wf <- 
+    workflow() %>% 
+    add_model(rf_mod) %>% 
+    add_formula(sale_price~.)
+
+rf_fit <- rf_wf %>% 
+    fit(train2)
+
+#변수 중요도 그리기 - vip()
+rf_fit %>% 
+  pull_workflow_fit() %>% 
+  vip(num_features = 30,
+      aesthetics = list(color = topo.colors(30), size = 0.8))
+
+rf_pred <- predict(rf_fit, new_data = test2) %>% exp()
+head(rf_pred)
+#0.15135 : lasso basic보다 성능 안좋음.
+```
+
+#### 2-2)Random Forest - tuning model
+```{r}
+set.seed(125)
+doParallel::registerDoParallel()
+
+rf_tuning_mod <- 
+    rand_forest(trees = 1000,
+                mtry = tune(),
+                min_n = tune()) %>% 
+    set_mode("regression") %>% 
+    set_engine("ranger") #importance = "impurity" , "permutation"
+
+rf_tuning_wf <- 
+    workflow() %>% 
+    add_model(rf_tuning_mod) %>% 
+    add_formula(sale_price~.)
+
+rf_tuning_params <- parameters(rf_tuning_mod) %>% 
+    finalize(train2)
+
+data_folds2 <- vfold_cv(train2,v=2,strata = sale_price)
+
+rf_tuned <- tune_bayes(
+    object = rf_tuning_wf,
+    resamples = data_folds2,
+    param_info = rf_tuning_params,
+    iter = 5,
+    metrics = metric_set(rmse),
+#    initial =5,
+    control = control_bayes(
+        verbose = F,
+#        no_improve = 5,
+        save_pred = T,
+        save_workflow = T
+    )
+)
+
+#튜닝 결과값 보기
+rf_tuned %>% 
+  show_best(metric = "rmse", n = 10) %>% 
+  pivot_longer(mtry:min_n, names_to="variable", values_to="value" ) %>% 
+  ggplot(aes(value, mean)) + 
+  geom_line()+ 
+  geom_point()+ 
+  facet_wrap(~variable,scales = "free")
+
+rf_best_model <- rf_tuned %>% 
+  select_best("rmse")
+
+rf_final_wf <- rf_tuning_wf %>% 
+  finalize_workflow(rf_best_model)
+
+rf_final_fit <- rf_final_wf %>% 
+  fit(train2)
+
+rf_tuning_pred <- predict(rf_final_fit,new_data = test2) %>% exp()
+head(rf_tuning_pred)
+#0.14113 > lasso 보다 성능이 좋지 않음. 
+#데이터 분할시 너무 오래 걸려서 v=2로 지정해서 성능이 낮을 수 있음.
+```
+
+#### 3-1)SVM - basic
+```{r warning=FALSE}
+set.seed(127)
+svm_mod <-
+    svm_rbf() %>%
+    set_mode("regression") %>%
+    set_engine("kernlab")
+#cost = tune(), rbf_sigma = tune()
+svm_wf <- 
+  workflow() %>% 
+  add_model(svm_mod) %>% 
+  add_formula(sale_price~.)
+
+svm_fit <- svm_wf %>% 
+  fit(train2)
+
+svm_pred <- predict(svm_fit,new_data = test2) %>% exp
+head(svm_pred)
+#0.17705
+#스케일이 안되다고 오류가 뜨는데 이유를 모르겠음..
+```
+
+#### 3-2)SVM - tuning model
+```{r}
+set.seed(127)
+svm_tuning_mod <- 
+  svm_rbf(cost = tune(),rbf_sigma = tune()) %>% 
+  set_mode('regression') %>% 
+  set_engine("kernlab")
+
+svm_params <- parameters(svm_tuning_mod) %>% 
+  finalize(train2)
+
+svm_tuning_wf <- 
+  workflow() %>% 
+  add_model(svm_tuning_mod) %>% 
+  add_formula(sale_price~.)
+
+data_folds3 <- vfold_cv(train2,v=3,strata = sale_price)
+
+svm_tuned <- tune_bayes(
+    object = svm_tuning_wf,
+    resamples = data_folds3,
+    param_info = svm_params,
+    iter = 10,
+    metrics = metric_set(rmse),
+    initial =5,
+    control = control_bayes(
+        verbose = F,
+        no_improve = 5,
+        save_pred = T,
+        save_workflow = T
+    )
+)
+#튜닝 결과 시각화
+svm_tuned %>%  
+  tune::show_best(metric = "rmse", n = 10) %>% 
+  tidyr::pivot_longer(cost:rbf_sigma, names_to="variable", values_to="value" ) %>% 
+  ggplot(aes(value, mean)) + 
+  geom_line(alpha=1/2)+ 
+  geom_point()+ 
+  facet_wrap(~variable,scales = "free")
+
+svm_best_mod <- svm_tuned %>% 
+  select_best("rmse")
+
+svm_final_wf <- 
+  svm_tuning_wf %>% 
+  finalize_workflow(svm_best_mod)
+svm_final_fit <- svm_final_wf %>% 
+  fit(train2)
+
+svm_tuning_pred <- predict(svm_final_fit,new_data = test2) %>% exp()
+head(svm_tuning_pred)
+#0.16487
+#입력변수 오류 떄문에 실제 제출 결과가 안좋음(위의 스케일 관련 문제인듯..)
+```
+
+#### 4-1)XGBoost - basic
+```{r}
+set.seed(125)
+xgb_mod <- boost_tree() %>% 
+  set_mode("regression") %>% 
+  set_engine("xgboost")
+xgb_wf <- 
+  workflow() %>% 
+  add_model(xgb_mod) %>% 
+  add_formula(sale_price~.)
+xgb_fit <- xgb_wf %>% 
+  fit(train2)
+
+xgb_pred <- predict(xgb_fit,new_data = test2) %>% exp()
+head(xgb_pred)
+
+#0.16776
+```
+
+#### 4-2)XGBoost - tuning model
+```{r}
+set.seed(126)
+xgb_tuning_mod <- 
+  boost_tree(trees = tune(), learn_rate = tune(),
+             tree_depth = tune(), min_n = tune()) %>% 
+            #mtry = tune()) %>% 
+             #loss_reduction = tune()) %>% 
+             #sample_size = tune()) %>% 
+  set_mode("regression") %>% 
+  set_engine("xgboost")
+
+
+xgb_tuning_params <- parameters(xgb_tuning_mod) %>% 
+  finalize(train2)
+
+xgb_tuning_wf <- 
+  workflow() %>% 
+  add_model(xgb_tuning_mod) %>% 
+  add_formula(sale_price~.)
+
+data_folds4 <- vfold_cv(train2,v=3,strata = sale_price)
+
+xgb_tuned <- tune_bayes(
+    object = xgb_tuning_wf,
+    resamples = data_folds4,
+    param_info = xgb_tuning_params,
+    iter = 10,
+    metrics = metric_set(rmse),
+#    initial =5,
+    control = control_bayes(
+        verbose = F,
+#        no_improve = 5,
+        save_pred = T,
+        save_workflow = T
+    )
+)
+
+best_xgb_model <- xgb_tuned %>% 
+    select_best("rmse")
+
+xgb_final_wf <- 
+  xgb_tuning_wf %>% 
+  finalize_workflow(best_xgb_model)
+
+xgb_final_fit <- xgb_final_wf %>% 
+  fit(train2)
+
+xgb_final_pred <- predict(xgb_final_fit,new_data = test2) %>% exp()
+head(xgb_final_pred)
+#0.12581 > 현재까지 best performance!
+#튜닝시 lasso보다 성능 좋다!
+```
+   
+  
+    
+-LightGBM  
+-Catboost    
+버전 이슈 때문에 설치가 되지않습니다..
