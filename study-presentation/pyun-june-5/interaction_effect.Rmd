@@ -1,0 +1,265 @@
+---
+title: "Boston housing 발표용2"
+author: "doyeon"
+date: '2021 6 3'
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center")
+```  
+
+# 2. 성능 향상을 위한 시도 - focus on interaction effects
+## 예측 모델의 성능 향상을 위해서 교호작용을 어떻게 반영해야할까?  
+1. 전문 지식 기반(based on expert knowledge):  
+- expert knowledge of the system under study is critical for guiding the process of selecting interaction terms.
+- 전문 지식을 바탕으로 교호작용 판단할 수 있는 항 생성
+- 머신러닝 모델에서 고차 교호작용이 크리티컬한 효과를 주는 경우 드물다.
+- 따라서, 일반적으로 2차 교호작용만 반영한다.  
+- Best approach!  
+  
+2. 완전 열거(complete enumeration):  
+- 전문 지식이 없는 경우 모든 교호작용 항을 고려해야하는 것이 원칙적이다.  
+- 그러나 현실적으로 변수가 많을 경우 모든 교호작용 항을 반영하기 불가능하다.  
+  
+3. Two-stage Modeling :  
+- 모델의 메인 변수들만 추출하여 변수들 및 변수들의 모든 교호작용 항 생성  
+- 주관적인 판단이 필요하며 모델의 설명력을 가장 높힐 수 있는 방법은 아니다.  
+  
+4. 트리기반 모델 사용:  
+- 일반적으로 트리 기반 모델은 변수들의 교호작용을 고려하여 작동한다.  
+    - 4-1)기본적인 트리 기반 모델 사용.  
+    - ***4-2)***랜덤포레스트 모델을 통해 변수중요도(vi)를 추출하여 변수들의 교호작용을 반영  
+
+5. FSA(The Feasible Solution Algorithm) - stepwise :  
+- 현실적으로 많이 사용함. 성능도 어느정도 보장됌.  
+
+## 4-2방법 :중요변수 추출 후 교호작용 생성하면 모델 성능이 향상될 것인가?  
+
+## Load Libraries
+```{r message=FALSE, warning=FALSE, results='hide'}
+library(data.table)
+library(tidyverse)
+library(tidymodels)
+library(janitor)
+#library(stacks)
+library(vip)
+library(knitr)
+```
+## Load the dataset
+```{r}
+train <- fread("./BostonHousing/train.csv",header=T) %>% 
+  clean_names()
+test <- fread("./BostonHousing/test.csv",header=T) %>% 
+  clean_names()
+test$sale_price <- NA
+```
+
+## rf의 vip()를 통해서 중요 변수 추출. 
+```{r}
+vip_rec <- train %>% 
+    recipe(sale_price~.) %>% 
+    step_rm(id) %>% 
+    step_log(sale_price) %>% 
+    step_impute_median(all_numeric(),-all_outcomes()) %>% 
+    step_impute_mode(all_nominal()) %>% 
+    step_BoxCox(all_numeric(),-all_outcomes()) %>% 
+    step_normalize(all_numeric(),-all_outcomes()) %>% 
+#    step_dummy(all_nominal()) %>% #본래 변수들만 추출하기 위해서 진행X
+    prep()
+
+vip_train <- vip_rec %>% juice()
+
+rf_mod <- 
+    rand_forest() %>% 
+    set_mode("regression") %>% 
+    set_engine("ranger",importance= "impurity")#"permutation"
+
+rf_wf <- 
+    workflow() %>% 
+    add_model(rf_mod) %>% 
+    add_formula(sale_price~.)
+
+rf_wf_fit <- rf_wf %>% 
+  fit(vip_train)
+
+rf_wf_fit %>% 
+  pull_workflow_fit() %>% 
+  vip(num_features = 10) 
+
+select_var <- rf_wf_fit %>% 
+  pull_workflow_fit() %>% 
+  vip(20) %>% 
+  pluck(1) %>% 
+  filter(Importance>10)
+
+select_var
+```
+## 추출된 중요 변수들의 상위 5개의 변수들만 교호작용을 생성하여 모델 형성
+```{r}
+housing_rec2 <- train %>% 
+    recipe(sale_price~.) %>% 
+    step_rm(id) %>%
+    step_interact(~overall_qual:gr_liv_area) %>% #교호작용 형성 함수
+    step_interact(~overall_qual:total_bsmt_sf) %>% 
+    step_interact(~overall_qual:year_built) %>% 
+    step_interact(~gr_liv_area:total_bsmt_sf) %>% 
+    step_interact(~total_bsmt_sf:year_built) %>%
+    step_log(sale_price) %>% 
+    step_impute_median(all_numeric(),-all_outcomes()) %>% 
+    step_impute_mode(all_nominal()) %>% 
+    step_BoxCox(all_numeric(),-all_outcomes()) %>% 
+    step_normalize(all_numeric(),-all_outcomes()) %>% 
+    step_dummy(all_nominal()) %>%
+    prep()
+
+train3 <- housing_rec2 %>% juice()
+dim(train3) #251의 열이 존재함 > 교호작용항 형성됌 확인
+test3 <- bake(housing_rec2,test)
+```
+
+## lasso 모델을 통해서 성능 비교
+```{r}
+#앞의 발표 코드와 동일.
+lasso_mod <- 
+  linear_reg(penalty = 0.01,
+             mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet")
+
+lasso_wf2 <- 
+    workflow() %>% 
+    add_model(lasso_mod) %>% 
+    add_formula(sale_price~.)
+
+lasso_fit2 <- 
+  lasso_wf2 %>% 
+  fit(train3)
+
+lasso_pred222 <- predict(lasso_fit2,new_data = test3) %>% exp()
+head(lasso_pred222)
+#0.13271 실질적인 성능 향상 확인! (기존 lasso 모델 0.13365)
+```
+
+## lasso tuning 모델에서도 성능 향상이 있을까?
+```{r}
+linear_tuning_mod <- 
+  linear_reg(penalty = tune(),
+             mixture = tune()) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet")
+
+linear_tuning_params2 <- parameters(linear_tuning_mod) %>% 
+    finalize(train3)
+
+linear_tuning_wf2 <- 
+    workflow() %>% 
+    add_model(linear_tuning_mod) %>% 
+    add_formula(sale_price~.)
+
+data_folds11 <- vfold_cv(train3,v=10,strata = sale_price)
+
+linear_tuned <- tune_bayes(
+    object = linear_tuning_wf2,
+    resamples = data_folds11,
+    param_info = linear_tuning_params2,
+    iter = 20,
+    metrics = metric_set(rmse),
+#    initial = 10,
+    control = control_bayes(
+        verbose = F,
+#        no_improve = 5,
+        save_pred = T,
+        save_workflow = T
+    )
+)
+linear_tuned %>% 
+  show_best("rmse")
+
+linear_best <- linear_tuned %>% 
+  select_best("rmse")
+
+linear_final_wf2 <- 
+  linear_tuning_wf2 %>% 
+  finalize_workflow(linear_best)
+
+linear_final_fit2 <- 
+  linear_final_wf2 %>% 
+  fit(train3)
+
+linear_final_pred2 <- predict(linear_final_fit2,new_data = test3) %>% exp()
+head(linear_final_pred2)
+#0.12205(1250등) 현재까지 베스트 성능!
+```
+
+
+## 그렇다면 기존 formula에서 가장 성능좋았던 xgboost에서도 성능 향상이 있나?
+```{r}
+xgb_tuning_mod <- 
+  boost_tree(trees = tune(), learn_rate = tune(),
+             tree_depth = tune(), min_n = tune()) %>% 
+            #mtry = tune()) %>% 
+             #loss_reduction = tune()) %>% 
+             #sample_size = tune()) %>% 
+  set_mode("regression") %>% 
+  set_engine("xgboost")
+
+
+xgb_tuning_params2 <- parameters(xgb_tuning_mod) %>% 
+  finalize(train3)
+
+xgb_tuning_wf2 <- 
+  workflow() %>% 
+  add_model(xgb_tuning_mod) %>% 
+  add_formula(sale_price~.)
+
+data_folds44 <- vfold_cv(train3,v=5,strata = sale_price)
+
+doParallel::registerDoParallel()
+xgb_tuned22 <- tune_bayes(
+    object = xgb_tuning_wf2,
+    resamples = data_folds44,
+    param_info = xgb_tuning_params2,
+    iter = 10,
+    metrics = metric_set(rmse),
+#    initial =5,
+    control = control_bayes(
+        verbose = F,
+#        no_improve = 5,
+        save_pred = T,
+        save_workflow = T
+    )
+)
+best_xgb_model22 <- xgb_tuned22 %>% 
+    select_best("rmse")
+
+xgb_final_wf22 <- 
+  xgb_tuning_wf2 %>% 
+  finalize_workflow(best_xgb_model22)
+
+xgb_final_fit22 <- xgb_final_wf22 %>% 
+  fit(train3)
+
+xgb_final_pred22 <- predict(xgb_final_fit22,new_data = test3) %>% exp()
+head(xgb_final_pred22)
+#0.12655 > 기존의 xgb_tuning보다 성능이 안좋음
+#물론 튜닝을 좀 더 하면 성능이 좋아질 수도 있다!
+#그러나 위에서 확인했듯이 tree 모델은 교호작용을 이미 고려하여 작동하기 떄문에 lasso처럼 교호작용항을 추가해도 성능이 크게 개선되지 않았을 수도 있다.(추측)
+```
+
+## recipeselectors::step_select_vip()를 통해서 자동으로 vi()를 고려하여 변수 선택하는 패키지 존재. but, 하이퍼튜닝이 현재는 불가함.
+```{r eval=F}
+library(recipeselectors)
+base_model <- 
+  rand_forest(mode = "regression") %>%
+  set_engine("ranger", importance = "permutation")
+
+housing_rec2 <- housing_rec %>% 
+  step_select_vip(all_predictors(),outcome = "sale_price",
+                  top_p = 60,model = base_model) %>% 
+  prep()
+```
+  
+앞으로 퍼포먼스 향상을 위해선 이상치 제거 및 NA impute method변경, 파생변수 형성 등을 시도해볼 수 있다!.
+
+

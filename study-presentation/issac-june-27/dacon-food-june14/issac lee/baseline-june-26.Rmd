@@ -1,0 +1,449 @@
+---
+title: "LightGBM 식사인원 예측 with Tidymodels"
+author: "슬기로운통계생활"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+editor_options: 
+  chunk_output_type: console
+---
+
+# 준비작업
+
+## 패키지 불러오기
+
+```{r}
+# remotes::install_github("tidymodels/stacks", ref = "main")
+# remotes::install_github("curso-r/treesnip")
+suppressMessages(library(treesnip))
+suppressMessages(library(stacks))
+suppressMessages(library(tidymodels))
+suppressMessages(library(tidyverse))
+suppressMessages(library(magrittr))
+suppressMessages(library(tidytext))
+suppressMessages(library(topicmodels))
+suppressMessages(library(tm))
+suppressMessages(library(skimr))
+suppressMessages(library(knitr))
+theme_set(theme_bw())
+```
+
+## 데이터셋 불러오기
+
+```{r}
+file_path <- "../input/dacon-food/"
+files <- list.files(file_path)
+files
+```
+
+각 변수의 이름을 `janitor` 패키지로 말끔하게 바꿔준다.
+
+```{r}
+train <- read_csv(file.path(file_path, "train.csv")) 
+test <- read_csv(file.path(file_path, "test.csv"))
+# View(test)
+```
+
+# 데이터 기본정보 확인
+
+```{r}
+train %>% 
+  head()
+```
+
+## 기본 정보
+
+```{r}
+dim(train)
+dim(test)
+```
+
+각 데이터 셋의 변수명을 살펴보자. 
+
+```{r}
+names(train)
+names(test)
+
+# train$yoil[is.na(train$seogsigmenyu)] 
+```
+
+# 텍스트 전처리 하기
+
+## 메뉴 추출
+
+```{r}
+# 메뉴 추출
+all_menu <- bind_rows(train, test) %>% 
+  select(중식메뉴, 석식메뉴)
+
+menu_extract <- function(menu_df, meal = "중식메뉴"){
+  menu_df %>% 
+    pull(meal) %>% # select를 하면 안됨! 주의
+    str_replace_all(pattern = '\\(New\\)','') %>% # (New) 표시 삭제
+    str_replace_all(pattern = '\\([가-힣:,./]+\\)?','') %>% # 원산지 정보 삭제1
+    str_replace_all(pattern = '\\(?[가-힣:,./]+\\)','') %>% # 원산지 정보 삭제2
+    str_squish() %>% # 연속된 공백 제거
+    as_tibble() -> result
+  result
+}
+
+## 점심 및 저녁 메뉴 텍스트 프로세싱 (메뉴 추출)
+lunch_menu <- menu_extract(all_menu, "중식메뉴")
+dinner_menu <- menu_extract(all_menu, "석식메뉴")
+lunch_menu
+```
+
+```{r}
+# https://www.kaggle.com/rtatman/nlp-in-r-topic-modelling
+# create a document term matrix to clean
+# mytest <- data.frame(value =c(
+#   "hello i am issac hahaha",
+#   "this is interesting! issac issac")
+# )
+reviewsCorpus <- Corpus(VectorSource(lunch_menu$value))
+
+reviewsDTM <- DocumentTermMatrix(reviewsCorpus)
+
+
+reviewsDTM_tidy <- tidy(reviewsDTM)
+# reviewsDTM$i
+# reviewsDTM$j
+# reviewsDTM$nrow
+# reviewsDTM$ncol
+# reviewsDTM$dimnames
+
+# 나만의 불용어 사전
+custom_stop_words <- tibble(word = c("쌀밥/잡곡밥", "포기김치", "쌀밥/흑미밥/찰현미밥", "배추겉절이", "열무김치", "겉절이김치", "알타리김치", "깍두기", "맑은국"))
+
+
+
+reviewsDTM_tidy %>%
+  filter(term == "쌀밥/잡곡밥")
+
+
+# DTM 에서 불용어가 있다 없애기
+reviewsDTM_tidy_cleaned <- reviewsDTM_tidy %>% 
+    anti_join(custom_stop_words, by = c("term" = "word")) # remove my custom stopwords
+reviewsDTM_tidy_cleaned
+
+# reviewsDTM_tidy_cleaned %>%
+#   group_by(term) %>% 
+#   count(count, sort = TRUE) -> wordcloud_db
+# 
+# wordcloud2::wordcloud2(wordcloud_db, size=0.1)
+
+# 깨끗해진 단어들로 문서 다시 만들기
+cleaned_documents <- reviewsDTM_tidy_cleaned %>%
+    group_by(document) %>% 
+    mutate(terms = toString(rep(term, count))) %>%
+    select(document, terms) %>%
+    unique()
+
+head(cleaned_documents)
+```
+
+
+```{r}
+# 이미 정해진 토픽 갯수에 따른 가장 중요한 단어 정보를 얻는 함수
+# input_text: dataframe columm 
+# plot: return a plot
+# number_of_topics: number of topics
+top_terms_by_topic_LDA <- function(input_text, 
+                                   plot = T, 
+                                   number_of_topics = 4) {    
+    # 코퍼스와 문서 행렬 만들기
+    # 코퍼스 (tm 패키지에서 사용되는 object)
+    input_text <- cleaned_documents$terms
+    Corpus <- Corpus(VectorSource(input_text))
+    DTM <- DocumentTermMatrix(Corpus)
+    
+    unique_indexes <- unique(DTM$i)
+    DTM <- DTM[unique_indexes,]
+    
+    if(plot == T){
+        # preform LDA & get the words/topic in a tidy text format
+        lda <- LDA(DTM, k = number_of_topics, 
+                   control = list(seed = 2021))
+        topics <- tidy(lda, matrix = "beta")
+    
+        # get the top ten terms for each topic
+        top_terms <- topics  %>% 
+          group_by(topic) %>% 
+          top_n(10, beta) %>% 
+          ungroup() %>% 
+          arrange(topic, -beta)
+
+        top_terms %>% 
+          mutate(term = fct_reorder(term, beta)) %>%
+          ggplot(aes(term, beta, fill = factor(topic))) + 
+        geom_col(show.legend = FALSE) + 
+          facet_wrap(~ topic, scales = "free") +
+          labs(x = NULL, y = "Beta") + 
+          coord_flip() # turn bars sideways
+    }else{ 
+        # preform LDA & get the words/topic in a tidy text format
+        lda <- LDA(DTM, k = number_of_topics, 
+                   control = list(seed = 2021))
+        topics <- tidy(lda, matrix = "gamma")
+        # 그래프 안그릴 경우 그냥 데이터 반환
+        return(topics)
+    }
+}
+```
+
+```{r}
+topics <- top_terms_by_topic_LDA(cleaned_documents$terms,                                 number_of_topics = 5, plot = F)
+
+topics %<>% 
+  mutate(topic = paste0("topic_", topic)) %>% 
+  pivot_wider(names_from = topic, 
+              values_from = gamma)
+
+train %>% dim()
+test %>% dim()
+
+all_data <- bind_rows(train, test)
+topics %>% dim()
+
+all_data <- topics %>%
+  select(starts_with("topic")) %>% 
+  bind_cols(all_data)
+
+train_index <- seq_len(nrow(train))
+train <- all_data[train_index,]
+test <- all_data[-train_index,]
+```
+
+
+## `recipe`를 통한 전처리 입력
+
+```{r}
+# 저녁 식사 인원 예측을 위한 모델 recipe
+food_recipe_dinner <- train %>% 
+  recipe(석식계 ~ .) %>% 
+  step_mutate(요일 = ordered(요일, 
+                             levels=c("월", "화", "수", "목", "금"))) %>% 
+  step_integer(요일) %>% 
+  step_mutate(
+    최대가능인원 = 본사정원수 - (본사휴가자수 + 본사출장자수 + 현본사소속재택근무자수),
+    최대가능인원비율 = 최대가능인원 / 본사정원수,
+    휴가비율 = 본사휴가자수 / 본사정원수,
+    출장비율 = 본사출장자수 / 본사정원수,
+    시간외근무명령서승인건수비율 = 본사시간외근무명령서승인건수 / 본사정원수,
+    본사재택근무비율 = 현본사소속재택근무자수 / 본사정원수,
+    년 = lubridate::year(일자),
+    월 = lubridate::month(일자),
+    일 = lubridate::day(일자)) %>%
+  step_unknown(석식메뉴, new_level = "미제공") %>% 
+  step_rm(일자, 조식메뉴, 중식메뉴, 석식메뉴, 중식계) %>%
+  step_normalize(all_predictors(), -all_outcomes()) %>% 
+  prep()
+
+# 저녁식사 예측을 위한 모델 recipe
+# food_recipe_dinner <- food_recipe_lunch
+# food_recipe_dinner$var_info$role[11] <- "outcome"
+# food_recipe_dinner$var_info$role[12] <- "predictor"
+# food_recipe_dinner$steps[[5]]$removals[5] <- "jungsiggye"
+```
+
+## `juice`를 통한 전처리 즙짜기
+
+`juice()` 함수를 통해서 recipe에 입력된 전처리를 짜낸 데이터를 얻어온다.
+
+```{r}
+train2 <- juice(food_recipe_dinner)
+test2 <- bake(food_recipe_dinner, new_data = test)
+# View(train2)
+# View(test2)
+# head(test2)
+```
+
+다음과 같이 결측치 없이 잘 코딩된 데이터를 얻었다는 것을 확인 할 수 있다.
+
+# 튜닝 준비하기
+
+`validation_split()` 함수를 사용하여 평가셋을 분리한다. 한 단계 더 나아간 cross validation은 `vfold_cv()`함수에서 제공하니 찾아보도록 하자.
+
+```{r}
+set.seed(2021)
+validation_split <- vfold_cv(train2, v = 5, strata = 요일)
+```
+
+* `NA` 체크
+
+```{r}
+train2 %>%
+map_df(~sum(is.na(.))) %>%
+  pivot_longer(cols = everything(),
+       names_to = "variable",
+       values_to = "na_count") %>% 
+  filter(na_count > 0)
+```
+
+## 튜닝 스펙 설정 - LGBM
+
+```{r}
+train2 %>% names()
+lgbm_spec <- boost_tree(
+    trees = 10000, 
+    tree_depth = 10,
+    mtry = tune(),
+    min_n = tune(), 
+    loss_reduction = tune(),  
+    sample_size = tune(), 
+    learn_rate = 0.001,
+    stop_iter = 10) %>% 
+    set_engine('lightgbm',
+               num_leaves = 20,
+               # linear_tree = TRUE,
+               # categorical_feature = c(1, 9, 10, 11),
+               num_threads = 10) %>% 
+    set_mode('regression')
+
+# translate(lgbm_spec)
+set.seed(2021)
+param_grid <- grid_random(
+    finalize(mtry(), train2[-1]),
+    min_n(), 
+    loss_reduction(),
+    sample_size = sample_prop(range = c(0.4, 1)),
+    size = 10
+) %>% filter(mtry > 3)
+param_grid
+
+lgbm_workflow <- workflow() %>%
+  add_model(lgbm_spec) %>% 
+  add_formula(석식계 ~ .)
+
+tictoc::tic()
+tune_result <- lgbm_workflow %>% 
+  tune_grid(validation_split,
+            grid = param_grid,
+            metrics = metric_set(mae))
+tictoc::toc()
+tune_result$.notes[[1]]$.notes[1]
+```
+
+# 튜닝 결과
+
+```{r}
+tune_result %>% show_best() %>% select(mean)
+tune_best <- tune_result %>% select_best(metric = "mae")
+final_spec <- finalize_model(lgbm_spec, tune_best)
+final_spec
+```
+
+# 학습 및 예측하기
+
+## 저녁식사 인원 예측
+
+```{r warning=FALSE,  message=FALSE}
+lgbm_workflow %<>% update_model(final_spec)
+lgbm_fit <- fit(lgbm_workflow, data = train2)
+lgbm_fit
+
+
+# test data
+result <- predict(lgbm_fit, test2)
+result %>% head()
+
+# test set 석식계 update
+test$석식계 <- round(result$.pred)
+train$석식계 <- predict(lgbm_fit, train2)$.pred %>% round()
+```
+
+```{r, message=FALSE}
+submission <- read_csv(file.path(file_path,
+                                 "sample_submission.csv"))
+submission$석식계 <- result$.pred %>% round()
+```
+
+
+## 점심식사 인원 예측
+
+```{r}
+# 점심 식사 인원 예측을 위한 모델 recipe
+food_recipe_lunch <- train %>% 
+  recipe(중식계 ~ .) %>% 
+  step_mutate(요일 = ordered(요일, levels=c("월", "화", "수", "목", "금"))) %>% 
+  step_integer(요일) %>% 
+  step_mutate(
+    최대가능인원 = 본사정원수 - (본사휴가자수 + 본사출장자수 + 현본사소속재택근무자수),
+    최대가능인원비율 = 최대가능인원 / 본사정원수,
+    휴가비율 = 본사휴가자수 / 본사정원수,
+    출장비율 = 본사출장자수 / 본사정원수,
+    시간외근무명령서승인건수비율 = 본사시간외근무명령서승인건수 / 본사정원수,
+    본사재택근무비율 = 현본사소속재택근무자수 / 본사정원수,
+    년 = lubridate::year(일자),
+    월 = lubridate::month(일자),
+    일 = lubridate::day(일자)) %>%
+  step_unknown(석식메뉴, new_level = "미제공") %>% 
+  step_rm(일자, 조식메뉴, 중식메뉴, 석식메뉴) %>%
+  step_normalize(all_predictors(), -all_outcomes()) %>% 
+  prep()
+
+train2 <- juice(food_recipe_lunch)
+test2 <- bake(food_recipe_lunch, new_data = test)
+
+set.seed(2021)
+validation_split <- vfold_cv(train2, v = 5, strata = 요일)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+lgbm_workflow <- workflow() %>%
+  add_model(lgbm_spec) %>% 
+  add_formula(중식계 ~ .)
+
+tictoc::tic()
+tune_result <- lgbm_workflow %>% 
+  tune_grid(validation_split,
+            grid = param_grid,
+            metrics = metric_set(mae))
+tictoc::toc()
+tune_result$.notes[[1]]$.notes[1]
+
+# mean: 66.6
+tune_result %>% show_best() %>% select(mean)
+tune_best <- tune_result %>% select_best(metric = "mae")
+final_spec <- finalize_model(lgbm_spec, tune_best)
+final_spec
+
+
+lgbm_workflow %<>% update_model(final_spec)
+lgbm_fit <- fit(lgbm_workflow, data = train2)
+lgbm_fit
+
+result <- predict(lgbm_fit, test2)
+result %>% head()
+```
+
+
+```{r}
+# train[train$일자 == "2019-10-04"| 
+#       train$일자 == "2016-10-06"|
+#       train$일자 == "2019-02-08"|
+#       train$일자 == "2017-09-29"|
+#       train$일자 == "2018-01-30"|
+#       train$일자 == "2016-10-06",]$중식메뉴
+
+# 점심식사 인원 없데이트
+submission$중식계 <- round(result$.pred)
+submission
+
+# 후처리
+# submission[submission$일자 == "2021-01-27",]$석식계 <- 0
+# submission[submission$일자 == "2021-02-24",]$석식계 <- 0
+# submission[submission$일자 == "2021-03-31",]$석식계 <- 0
+
+write.csv(submission, row.names = FALSE,
+          fileEncoding = "UTF-8",
+          "food_lgbm_baseline_june26.csv")
+```
+
