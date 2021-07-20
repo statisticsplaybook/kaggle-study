@@ -12,13 +12,10 @@ output:
     code_folding: show
 ---
 
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE,
                       fig.align = "center")
 ```
-
-
 
 # Preparations (준비작업) {.tabset .tabset-fade}
 
@@ -48,7 +45,6 @@ files
 train <- read_csv(file.path(file_path, "train.csv"))
 test <- read_csv(file.path(file_path, "test.csv"))
 ```
-
 
 # Data overview (데이터 기본정보)
 
@@ -105,7 +101,6 @@ all_data %>% mutate(year = year(datetime),
 all_data$wday <- factor(all_data$wday, labels = c('Sun', 'Mon', 'Tue', 'Wed', 'Thur', 'Fri', 'Sat'))
 all_data$month <- as.factor(all_data$month)
 ```
-
 
 # Discretize
 
@@ -256,9 +251,7 @@ final_xgb %>%
     vip(geom = 'point')
 ```
 
-
-## partial dependence profile 
-
+## partial dependence profile
 
 ```{r}
 library(DALEXtra)
@@ -278,11 +271,11 @@ pdp_xgb2 <- model_profile(explainer_xgb, N = NULL,
 plot(pdp_xgb2)
 ```
 
--  온도가 올라갈수록 자전거를 타는 횟수가 증가함. 
--  습도가 0~25 사이에서는 자전거를 타는 횟수가 증가하지만, 75이상부터는 자전거를 타는 횟수가 급격하게? 감소함(축 값이 작음) 
-
+-   온도가 올라갈수록 자전거를 타는 횟수가 증가함.
+-   습도가 0\~25 사이에서는 자전거를 타는 횟수가 증가하지만, 75이상부터는 자전거를 타는 횟수가 급격하게? 감소함(축 값이 작음)
 
 ## SHAP value
+
 ```{r}
 xgb_mod <- final_xgb %>% 
   fit(data = train2) %>%   
@@ -299,14 +292,37 @@ autoplot(shap, type = 'contribution' ,row_num = 1) # explain first row of X
 
 ```
 
+# Model-specific method {.tabset .tabset-fade}
 
-# feature importance가 어떤 의미가 있는가? {.tabset .tabset-fade}
+## Random forest 
 
-## Random forest feature importance
+![https://towardsdatascience.com/random-forest-learning-essential-understanding-1ca856a963cb](https://miro.medium.com/max/599/1*V1gaYbSzecaGE7s6WVIcsQ.png)
 
-## impurity feature importance
+## Purmutation importance in random forest
 
-## xgboost feature importance
+$$
+\begin{align*}
+\text{within each tree } t \\
+&VI^{(t)}(x_j) = \frac{\sum_{i=\bar B^{(t)}} I(y_i = \hat{y}_i^{(t)})}{|\bar B^{(t)}|} - \frac{\sum_{i=\bar B^{(t)}} I(y_i = \hat{y}_{i, \pi_j}^{(t)})}{|\bar B^{(t)}|}  \\
+&\hat{y}_i^{(t)} = f^{(t)}(x_i) : \text{predicted class before permuting} \\
+&\hat{y}_{i, \pi_j}^{(t)} = f^{(t)}(x_{i, \pi_j}) : \text{predicted class after permuting }X_j \\
+&X_{i, \pi_j} = (x_{i,1}, \cdots, x_{i, j-1}, x_{\pi_j(i), j}, x_{i, j+1}, \cdots , x_{i, p}) \\ 
+& \bar B^{(t)} = \text{out of bag sample} \\
+
+\text{over all trees:} \\ 
+&\text{1. row importance : } VI(x_j) = \frac{\sum_{t = 1}^{ntree}VI^{(t)}(x_j)}{ntree} \\ 
+&\text{2. scale importance : } sVI(x_j) = \frac{VI(x_j)}{\frac{\hat{\sigma}}{\sqrt ntree}} \\ 
+
+\end{align*}
+$$
+
+**참고**
+
+<https://www.zeileis.org/papers/Lifestat-2008.pdf>
+
+## Gini importance in random forest
+
+# Model-agnostic method {.tabset .tabset-fade}
 
 ## Permutation importance
 
@@ -352,11 +368,8 @@ validation set에서 특정 변수의 관측치를 shuffle하고, 나머지 변�
 
 -   weight의 구간을 이용한 해석 필요
 
-![<https://www.kaggle.com/dansbecker/permutation-importance>](C:/Users/uos/AppData/Local/RStudio/tmp/paste-8F9BD519.png)
-
-
-
 **R code**
+
 ```{r}
 library(DALEXtra)
 
@@ -411,7 +424,6 @@ svm_fit %>%
       pred_wrapper = kernlab::predict, train = ames_train)
 ```
 
-
 ## Partial dependence plot
 
 feature importance는 어떤 변수가 예측에 가장 큰 영향을 미쳤는지를 보여주고, partial dependence plot은 변수가 예측에 미치는 영향에 대해 보여줌.
@@ -458,7 +470,6 @@ $\hat{f}$를 안다고 할 때, $x_{c}^{(i)}$ 는 데이터셋으로 부터 주�
 
 -   독립성 가정
 
-
 **R code**
 
 ```{r}
@@ -499,21 +510,9 @@ plot(pdp_rf)
 
 ```
 
-
 ## Shap value
 
-
-
-
-
 **code**
-
-
-
-
-
-
-
 
 참고자료
 
@@ -532,3 +531,5 @@ plot(pdp_rf)
 <https://stackoverflow.com/questions/67634344/r-partial-dependence-plots-from-workflow>
 
 <https://cran.r-project.org/web/packages/fastshap/fastshap.pdf>
+
+<https://www.youtube.com/watch?v=lIT5-piVtRw>
