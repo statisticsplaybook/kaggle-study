@@ -47,7 +47,7 @@ theme_set(theme_bw())
 ## Data load
 
 ```{r}
-file_path <- "C:/Users/uos/Desktop/kaggle-study/input/bike-sharing-demand/"
+file_path <- "../input/bike-sharing-demand/"
 files <- list.files(file_path)
 files
 ```
@@ -60,7 +60,6 @@ test <- read_csv(file.path(file_path, "test.csv"))
 # Data overview (데이터 기본정보) {.tabset .tabset-fade}
 
 ## train data
-
 ```{r}
 head(train)
 skim(train)
@@ -83,7 +82,6 @@ test %>%
 
 ```{r}
 all_data <- bind_rows(train, test)
-
 ```
 
 ## Change variable type
@@ -266,6 +264,8 @@ all_data %>%
     #step_discretize_xgb(windspeed)
     prep(training = all_data) %>% 
     bake(new_data = all_data) -> all_data
+
+table(all_data$windspeed)
 ```
 
 # Recipe + preperation {.tabset .tabset-fade}
@@ -315,6 +315,7 @@ xgb_spec <- boost_tree(
 
 params <- parameters(xgb_spec) %>% 
     finalize(train2)
+params
 ```
 
 # XGboost workflow {.tabset .tabset-fade}

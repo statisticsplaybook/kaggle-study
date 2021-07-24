@@ -6,6 +6,12 @@ library(magrittr)
 library(probably)
 library(gt)
 library(parallel)
+library(modeltime)
+library(modeltime.ensemble)
+library(modeltime.resample)
+library(plotly)
+library(tidyquant)
+library(timetk)
 
 # Store - the store number
 # Dept - the department number
@@ -49,12 +55,29 @@ features %>% select(starts_with('mark_down')) %>%
     summarise(across(.fns = ~mean(., na.rm = T)))
 
 
+
+
 train <- left_join(train, features, by = c('store', 'date', 'is_holiday'))
 test <- left_join(test, features, by = c('store', 'date', 'is_holiday'))
 
-train <- train %>% select(-starts_with('mark'))
-test <- test %>% select(-starts_with('mark'))
 
+# 
+# train %>% 
+#     plot_time_series(
+#         date, weekly_sales, 
+#         .interactive = TRUE, 
+#         .facet_ncol = 3, 
+#     )
+    
+forecast_horizon <- 52
+
+full_data_tbl <- train %>% 
+    select(date, weekly_sales) %>% 
+    future_frame(
+        .date_var = date, 
+        .length_out = forecast_horizon, 
+        .bind_data = T
+    )
 
 
 
