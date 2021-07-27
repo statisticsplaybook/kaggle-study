@@ -1,0 +1,263 @@
+---
+title: "MoA 발표"
+author: "Dy"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(ggtext)
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE, warning = FALSE, message = FALSE, echo =TRUE, dpi = 180)
+
+```
+
+```{r}
+library(vroom) #import datasets much faster
+library(skimr) #EDA
+library(tidyverse) 
+library(tidymodels) 
+library(lubridate)
+library(gridExtra)
+library(extrafont)
+theme_set(theme_grey(base_family='NanumGothic'))
+```
+
+## 데이터 불러오기
+```{r}
+path <-  "/Users/doyeonpyun/Documents/R/workspace/moa/"
+
+train <- vroom(str_c(path,'train_features.csv'), col_types = cols())
+targets <- vroom(str_c(path, "train_targets_scored.csv"), col_types = cols())
+targets_non <- vroom(str_c(path, "train_targets_nonscored.csv"), col_types = cols())
+test <- vroom(str_c(path,'test_features.csv'), col_types = cols())
+sample_submit <- vroom(str_c(path,'sample_submission.csv'), col_types = cols())
+
+```
+
+## EDA  
+### Train  
+```{r}
+train %>% head(5)
+```
+크게 5종류 cp_type / cp_time / cp_dose / 'g-' gene data / 'c-' cell data  
+
+```{r}
+#1.gene data
+train %>% select(starts_with('g-')) %>% ncol() #772개
+#2.cell data
+train %>% select(starts_with('c-')) %>% ncol() #100개
+#3.cp_type
+#ctl_vehicle(control perturbation)-no MoA / trt_cp(treated with a compound)
+train %>% 
+  select(cp_type) %>% 
+  group_by(cp_type) %>% 
+#  n_unique() %>% 2개
+  summarise()
+#4)cp_time :duration of the treatment
+#24 / 48 / 72
+train %>% 
+  select(cp_time) %>% 
+  group_by(cp_time) %>% 
+#  n_unique() %>%  #3개
+  summarise()
+#5)cp_dose : dosage of the treatment
+#D1 (High)/ D2(Low)
+train %>% 
+  select(cp_dose) %>% 
+  group_by(cp_dose) %>% 
+#  n_unique() %>%   #2개
+  summarise()
+```  
+## Train visualisation    
+```{r}
+p1 <- train %>% 
+  count(cp_type) %>% 
+  add_tally(n, name = "total") %>% 
+  mutate(perc = n/total) %>% 
+  ggplot(aes(cp_type, perc, fill = cp_type)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%s", n)), nudge_y = 0.02) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("grey70", "violetred")) +
+  theme_minimal() +
+  theme(legend.position = "none", plot.subtitle = element_text(size = 10)) +
+  labs(x = "", y = "", fill = "State", title = "Sample treatment", subtitle = "(Compound vs Control)")
+p1
+# Controls have no MoAs. 이후 값으로 0으로 지정해줘야 합니다.
+```
+```{r}
+#1-2 cp_dose(D1 : high, D2: low)
+p2 <- train %>% 
+  count(cp_dose) %>% 
+  add_tally(n, name = "total") %>% 
+  mutate(perc = n/total) %>% 
+  ggplot(aes(cp_dose, perc, fill = cp_dose)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%s", n)), nudge_y = 0.02) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("darkblue", "darkred")) +
+  theme_minimal() +
+  theme(legend.position = "none", plot.subtitle = element_text(size = 10)) +
+  labs(x = "", y = "", fill = "State", title = "Treatment Dose", subtitle = "(high vs low)")
+#1-3 cp_time
+p3 <- train %>% 
+  count(cp_time) %>% 
+  mutate(cp_time = as.factor(cp_time)) %>% 
+  add_tally(n, name = "total") %>% 
+  mutate(perc = n/total) %>% 
+  ggplot(aes(cp_time, perc, fill = cp_time)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%s", n)), nudge_y = 0.01) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(type = "seq", palette = "Oranges") +
+  theme_minimal() +
+  theme(legend.position = "none", plot.subtitle = element_text(size = 10)) +
+  labs(x = "", y = "", fill = "State", title = "Treatment duration", subtitle = "(Units of hours)")
+
+grid.arrange(p2,p3,nrow = 1, ncol = 2)
+#balanced data
+```
+### Target
+```{r}
+targets %>% dim() #(23814, 207)
+```
+1개의 sig_id행을 제외하고 206개의 target값을 예측해야합니다.
+현재까지 진행했던 기존 모델들로 학습하기엔 성능이 매우 안좋을 것으로 예상됩니다.
+5개의 등급을 예측하는 것도 정확도가 50%이하로 성능이 안좋았던 경험이 있습니다.
+이런 경우 딥러닝 모델을 사용하면 성능이 상대적으로 좋은 것으로 예상됩니다.
+
+## Target visualisation
+```{r}
+#시간 오래 걸림!
+rowstats <- targets %>% 
+  select(-sig_id) %>% 
+  rowwise() %>% 
+  mutate(sum = sum(c_across(everything()))) %>% 
+  select(sum) %>% 
+  ungroup()
+rowstats %>% 
+  count(sum) %>% 
+  add_tally(n, name = "total") %>% 
+  mutate(perc = n/total) %>% 
+  mutate(sum = as.factor(sum)) %>% 
+  ggplot(aes(sum, n, fill = sum)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.2f%%", perc*100)), nudge_y = 500) +
+  # scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "Set2") +
+  theme_minimal() +
+  theme(legend.position = "none", plot.subtitle = element_text(size = 10)) +
+  labs(x = "", y = "", title = "Number of Activations per Sample")
+```
+206개의 열들은 각각 0,1 값을 갖을 수 있습니다.
+한 약물에 대한 반응은 여러개가 나올 수 있으며 해당 데이터 셋에서는 동시에 2~7개가 나올 수 있음을 확인할 수 있습니다.  
+
+## PCA 부분은 생략하고 진행하겠습니다.
+
+## Data split
+```{r}
+training <- train %>%
+    left_join(targets %>% rename_with(.fn = ~paste0("target_", .), .cols = -sig_id),
+              by = "sig_id")
+training %>% 
+  select(starts_with('target_')) %>% head() #%>% ncol() #206개
+#target데이터의 열들이 target을 앞에 붙혀서 잘 조인된 것을 알 수 있습니다.
+
+set.seed(123)
+split <- initial_split(training, prop = 0.8, strata = cp_type)
+
+#train set 형성.
+#저희가 평소에 진행하던 분할이랑 조금 다릅니다.
+#딥러닝 학습을 위하여 train 데이터의 x값과 y값들을 두개의 데이터셋으로 분할해줍니다.
+X_train_pre <- training(split) %>% 
+    select(-starts_with("target"), -sig_id)
+#target으로 시작하는 열 제거, 즉 training셋에서 x값들만 지정해줍니다.
+y_train <- training(split) %>% 
+    select(starts_with("target")) %>% 
+    as.matrix() #딥러닝 input형태는 dataframe형식이 지원하지 않으므로 matrix로 변환해줍니다.
+#training셋에서 y값만 따로 지정해줍니다.
+
+#동일한 형태로 validation 셋 형성해줍니다.
+X_valid_pre <- testing(split) %>% 
+    select(-starts_with("target"), -sig_id)
+y_valid <- testing(split) %>% 
+    select(starts_with("target")) %>% 
+    as.matrix()
+```
+
+## Preprocessing with Recipe
+```{r}
+moa_rec <- X_train_pre %>% 
+  recipe() %>% #해당 데이터셋에는 target에 대한 정보가 없기때문에 formula를 지정해줄 수 없습니다.
+  update_role(everything(), new_role = "predictor") %>%
+  #기존에는 recipe()안에 formula를 지정해주므로 모델에 x,y값을 알려주었지만 불가능하므로,
+  #update_role()을 통해서 predictor에 관한 정보를 입력해줍니다.
+  step_integer(c(cp_type, cp_dose), zero_based = TRUE) %>%
+  step_normalize(cp_time) %>%
+  step_pca(starts_with("g-"), threshold = 0.95, prefix = "pcg_") %>% 
+  #pca 결과 pcg_를 앞에 붙혀라 / variance = 95%를 유지하며 pca를 진행해라.
+  step_pca(starts_with("c-"), threshold = 0.95, prefix = "pcc_")
+```
+
+## Juice
+```{r}
+X_train <- moa_rec %>% prep() %>% juice() %>% as.matrix()
+X_valid <-  moa_rec %>% prep() %>% bake(X_valid_pre) %>% as.matrix()
+X_test <-  moa_rec %>% prep() %>% bake(test) %>% as.matrix()
+ncol(train)#876
+ncol(X_train)#550, recipe 적용 후 데이터
+#876 to 550으로 축소된 것을 알 수 있습니다.
+```
+
+## Modeling
+```{r}
+model <- keras_model_sequential() %>% #레이어를 차곡차곡 쌓아주기 위해서 뼈대를 지정해줍니다.
+  layer_dense(units = 2048, activation = "relu", input_shape = ncol(X_train)) %>% #첫번쨰 레이어
+  #input값으로 X_train의 모든 열을 지정해줍니다. 활성화 함수는 relu함수를 지정해주고 ouput은 2048개로 지정해줍니다.
+  layer_dense(units = 1024, activation = "relu") %>% #두번쨰 레이어
+  layer_dropout(0.2) %>% #2번3번레이어 사이에서 20%의 노드를 드랍아웃해주는 설정을 통해서 과적합을 방지해줍니다.
+  layer_dense(units = ncol(y_train), activation = "sigmoid")#마지막 레이어에서 sigmoid 함수를 사용하여 분류문제에 맞는 결과값을 도출할 수 있도록 합니다.
+```
+
+## 딥러닝 환경 구축. optimizer 및 early_stop 지정
+```{r}
+model %>% compile(
+  optimizer = optimizer_adam(lr = 1e-4), #learning rate
+  loss = "binary_crossentropy" #분류문제에 해당하는 loss function 지정
+)
+#adam optimizer를 지정해주므로 딥러닝 학습 최적화를 시켜줍니다.
+cb_early_stopping <- callback_early_stopping(patience = 5, restore_best_weights = TRUE)
+#학습 과정에서 5번 연속 성능향상이 없다면 과적합 방지를 위해서 early stop해줍니다.
+```
+
+
+## 학습
+```{r}
+history <- model %>% fit(X_train, y_train,
+                         epochs = 20, # 총 진행할 학습 횟수
+#                         verbose = 0,
+                         batch_size = 32, #하나의 epoch안에서 얼만큼의 크기에 해당하는 학습을 진행할 것인가?
+                         callbacks = list(cb_early_stopping), #앞에 지정했던 early stop 지정
+                         validation_data = list(X_valid, y_valid)
+                        )
+#해당 학습 과정을 자동적으로 plot을 통해서 확인할 수 있습니다.
+history
+```
+
+## Predict
+```{r}
+pred <- model$predict(X_test)
+pred
+colnames(pred) <- str_remove_all(colnames(y_valid), "target_")
+pred <- pred %>%
+    as_tibble() #딥러닝 학습의 output이 matrix이므로 dataframe형식으로 변환해줍니다.
+pred
+pred[test$cp_type == "ctl_vehicle",] <- 0 #위 데이터 설명에서 확인했듯이 control 타입은 MoA가 존재하지 않으니 0으로 업데이트 해줍니다.
+pred
+submit <- test %>%
+    select(sig_id) %>%
+    bind_cols(as_tibble(pred))
+```
+
+
+

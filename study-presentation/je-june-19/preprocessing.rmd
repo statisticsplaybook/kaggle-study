@@ -1,0 +1,574 @@
+---
+title: "Regex_정규표현식"
+author: "SangminJe"
+date: '2021 6 19 '
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+> Dacon에서 텍스트 데이터를 중점으로 Pre-Processing을 수행합니다.
+
+# 개요
+
+---
+
+먼저 Dacon 데이터는 숫자 변수와 문자 변수가 섞여있습니다. 그 중에서 문자 변수는 메뉴에 대해서 적혀있습니다. 문제는, 이 메뉴와 관련된 Column에 모든 메뉴가 다 적혀 있어서 세부적인 정보단위로 분절하기 위해 노력이 필요하다는 점입니다. 그래서 해당 부분을 정리하면서, 제가 공부한 부분과 적절히 섞어서 준비했습니다.
+
+# 들어가면서
+
+---
+
+1. NLP와 텍스트 마이닝
+  - [NLP란](https://konlpy-ko.readthedocs.io/ko/v0.4.3/start/)
+  - **NLP**는 기본적으로 Natural Language Processing을 의미합니다. 번역하면 자연어처리입니다. 이 분야는 텍스트 요약, 챗봇 등에 활용하기 위해서 자연어를 형태소 단위로 분절하여 의미있는 조합을 만들 때 사용합니다.
+  - **텍스트마이닝**은 텍스트 속에서 의미를 찾는 일련의 활동을 말합니다. 보통 SNS 데이터를 분석해서 감정단어를 조사하거나 빈도조사, 워드클라우드, 리뷰 분석 등이 여기에 속합니다.  
+  
+2. 이번 Dacon 대회에서 필요한 과정
+  - 위에서 NLP와 텍스트마이닝을 살짝 언급했지만, 솔직히 이야기해서 이번에 Dacon의 문제는 자연어처리나 텍스트마이닝으로 보기 어렵습니다. 왜냐하면 우리는 적절히 데이터를 Tabular 형태로 만들어서 머신러닝으로 사용하기 쉬운 형태로 바꿔주면 목적을 달성하기 때문입니다.
+  - 이런 목적에 따라서 저는 **정규표현식**을 주로 사용하면서 **머신러닝**으로 풀기 적합한 데이터를 만들기 위해 노력했습니다.
+  - 완벽한 상태로 데이터를 만든 것은 아니지만, 이런 식으로 데이터를 분할하면 꽤 활용할만한 데이터셋으로 바꿀 수 있다는 것을 보여드리고 싶습니다.  
+3. 참고자료
+  - [정규표현식 연습링크](https://regexr.com/5mhou)
+  - [엘리의 드림코딩 - 정규표현식](https://www.youtube.com/watch?v=t3M6toIflyQ)
+
+그럼 본격적인 분석에 돌입하겠습니다.
+
+# library call
+
+---
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+library(readr)
+library(tidyverse)
+library(magrittr)
+library(skimr)
+library(gridExtra)
+```
+
+# Data {.tabset .tabset-fade}
+
+---
+
+## Load & Check
+
+```{r}
+# data
+train <- read_csv('data/train.csv')
+test <- read_csv('data/test.csv')
+
+# data Check
+skim(train)
+# missing data 없음
+```
+
+- train과 test를 분리하여 로드하였습니다.
+
+## Load & Check 2
+
+```{r}
+# 증식메뉴의 형태
+train[, 8:10] %>% head() %>% pull(2) %>% .[1]
+
+# Data 결합 후 조식 삭제, origin 만들기
+all_origin <- bind_rows(train, test)
+all <- all_origin %>% 
+  select(-c(조식메뉴))
+
+```
+
+- Data 양식을 확인했습니다.
+- 중식계와 석식계를 예측하므로, 조식은 제외시켰습니다.
+- all과 all_origin을 만들어 원본데이터를 보존했습니다.
+
+
+# 중식메뉴 {.tabset .tabset-fade}
+
+---
+
+저희가 알고 싶은 데이터는 중식계와 조식계입니다. 이를 예측하는 데 가장 필요한 데이터가 메뉴에 대한 정보입니다. 하지만 하나의 컬럼에 모든 메뉴가 섞여있는 탓에 이 데이터를 분리할 필요성이 있습니다.
+
+```{r}
+## 신메뉴 추가
+all %>% 
+  mutate(new_recipe_lunch = ifelse(grepl(pattern = '\\(New\\)',중식메뉴), 'Y','N'),
+         new_recipe_dinner = ifelse(grepl(pattern = '\\(New\\)',중식메뉴), 'Y','N'))->all
+
+## 중식메뉴 프로세싱 (데이터 분할)
+all %>% 
+  pull(중식메뉴) %>%
+  str_replace_all(pattern = '\\([가-힣:,./]+\\)?','') %>% # 원산지 정보 삭제1
+  str_replace_all(pattern = '\\(?[가-힣:,./]+\\)','') %>% # 원산지 정보 삭제2
+  # str_replace_all(pattern = '\\<[가-힣:,./]+\\>','') %>% # 불필요 정보 삭제
+  str_replace_all(pattern = '  ',' ') %>% # 공백 두 개는 하나로
+  str_split(pattern='\\s', simplify = T) %>% # simplify = T -> Matrix로 변환
+  as.tibble()-> all1
+
+### 일자와 하나로 합치기
+all1 <- bind_cols(all %>% select(일자), all1)
+
+```
+
+- 먼저 데이터를 살펴본 결과, 모든 메뉴에 **(New)**라는 단어가 들어가는 경우 신메뉴입니다. 그래서 신메뉴를 각각 중식과 석식에서 분리해주고 그 데이터를 다시 all로 잡아줬습니다.
+- 그리고 **정규표현식**을 사용하여 원산지 정보가 포함된 컬럼은 삭제했습니다. 보통 원산지를 보고 식당을 갈 지 안갈 지를 정하지는 않는다고 봤어요.
+- 그리고 공백을 정리한 후 `str_split()`함수를 사용하고 `simplify = T`를 인수로 줘서 공백을 기준을 단어를 분절한 결과를 Matrix로 보낼 수 있었습니다.
+- 마지막으로는 Tibble 형태로 데이터를 바꿔준 후 all1에 저장합니다.
+- 그리고 일자와 붙여줍니다. 이는 나중에 `left_join`시에 키로 사용할 예정입니다.
+
+## Menu Check
+
+데이터를 각각 확인해줍니다. 각 Column 별로 어떤 데이터가 할당되어 있는지 확인 하고 어떻게 엔지니어링할 것인지 가늠해보는 단계입니다.
+```{r}
+### V1 - 밥
+all1 %>% pull(V1) %>% unique() %>% head() # 밥 / 라이스 / 덮밥
+str_split_fixed(all1$V1,pattern = '\\/',n=3) %>% head()
+
+### V2 - 국 / 탕 / 찌개
+all1 %>% pull(V2) %>% unique() %>% head() # 밥 원산지 / 국 / 탕 / 찌개
+
+### V3 - Main
+all1 %>% pull(V3) %>% unique() %>% head()
+
+### V4 - sub_main
+all1 %>% pull(V4) %>% unique() %>% head()
+
+### V5 나물/김치/무침/조림/디저트
+all1 %>% pull(V5) %>% unique() %>% head()
+
+### V6 김치/디저트/ 무침 샐러드
+all1 %>% pull(V6) %>% unique() %>% head()
+
+### V7 김치/샐러드/디저트/샐러드/나물/무침/구이...
+all1 %>% pull(V7) %>% unique() %>% head()
+
+### V8 김치 /샐러드 / 디저트
+all1 %>% pull(V8) %>% unique() %>% head()
+
+```
+
+- 잘 보시면 아시겠지만, 첫번 째는 밥류, 두 번재는 국류 등으로 나름의 순서가 정해져 있습니다. 그래서 이 순서를 잘 이용하면 굳이 모든 데이터를 형태소 단위로 풀어헤치지 않아도 좋을 것 같습니다.
+- V5~V8까지는 메뉴가 섞이기 시작합니다. 이것을 조금 분리해서 정리해 줄 필요가 있어보입니다.
+
+## Menu split
+
+### Menu split - V5 ~ V8 정리
+
+```{r}
+all1 %>% 
+  unite('mess_menu',V5:V8, sep='_') %>% 
+  mutate(
+    # 김치 겉절이 깍두기 등
+    kimchi = str_extract(mess_menu, pattern = "[가-힣]+김치|[가-힣]+두기|[가-힣]+겉절이+|[가-힣]+박지"),
+    # 요구르트 식혜 과일류
+    desert = str_extract(mess_menu, pattern = "요구르트|[가-힣]+D|[가-힣]*음료|[가-힣]*호떡|식혜|청포도|바나나|복숭아|오렌지|수박|[가-힣]*토마토|[가-힣]+주스|[가-힣]*아이스티|[가-힣]+빵|[가-힣]*케익|요플레|[가-힣]*츄러스|[가-힣]*화채"),
+    # ~ 샐러드
+    salad = str_extract(mess_menu, pattern = "[가-힣]*샐러드"),
+    # 조림 무침 나물 볶음 등
+    sub_main = str_extract(mess_menu, pattern = "[가-힣]*생채|[가-힣]*무침|[가-힣]*나물|[가-힣]*볶음|[가-힣]*구이|[가-힣]*찜|[가-힣*]+쌈|[가-힣]*조림|[가-힣]*잎지|[가-힣*]*초장|[가-힣]*감자|[가-힣]*고구마|[가-힣]*두부|[가-힣]*말랭이|[가-힣]*파래김|[가-힣]*떡볶이|[가-힣]*부추전|[가-힣]*숙회|[가-힣]*스틱|탕평채|[가-힣]*냉채|[가-힣*]*양념장|[가-힣*]*잡채")
+  ) %>% 
+  select(일자, V1:V4, kimchi, desert, salad, sub_main) -> all1
+```
+- 정규표현식의 도움을 많이 받았습니다. 그리고 위에 언급드린 사이트를 잘 활용하세요!
+- `unite`함수는 컬럼에 흩어진 문자열을 다시 `_`을 delimeter로 하여 묶어주는 역할을 합니다.
+- `str_extract`를 사용해서 패턴과 일치하는 문자열을 뽑아냈습니다. 간단히 설명하자면, 김치로 끝나거나 두기, 겉절이로 끝나는 단어들은 다 김치로 넣는 식입니다.
+- 똑같은 방식으로 ** kimchi, desert, salad, sub_main** 를 만들었습니다.
+
+### Menu split - 메인 메뉴들과 합치기
+
+```{r}
+all1 %>% 
+  mutate(rice1 = str_split_fixed(V1,pattern = '\\/',n=3) %>% .[,1],
+         rice2 = str_split_fixed(V1,pattern = '\\/',n=3) %>% .[,2],
+         rice3 = str_split_fixed(V1,pattern = '\\/',n=3) %>% .[,3],
+         stew = V2,
+         main = V3,
+         sub_main1 = V4,
+         sub_main2 = sub_main
+  ) %>% 
+  select(-c(V1:V4),sub_main) -> all_lunch
+```
+- `str_split_fixed`의 경우에는 n=3으로 할 경우 데이터를 3개의 열을 가진 matrix 형태로 쪼개줍니다. 이렇게 한 이유는 밥은 예를 들어서, 쌀밥/잡곡밥/곤드레밥 식으로 나누어져 있는 경우가 있기 때문입니다.
+- 그외 stew, main 등은 잘 정리해서 all_lunch 안에 집어 넣습니다.
+
+## Menu Check 2
+
+```{r}
+all_lunch %>%
+  mutate_all(na_if,"") %>% # ''이면 NA로 치환 
+  skim() # sub_main : 0.89 / salad : 0.162 / desert : 0.2 / kimchi : 0.995 / rice1 : 0.837 / rice2 : 0.131, stew : 0.999, sub_main2 : 0.890 
+
+# NA이거나 ''인 값들은 치환
+all_lunch %>% 
+  mutate_all(na_if,"") %>% # ''이면 NA로 치환 
+  replace(is.na(.), '미제공') -> all_lunch # 값이 없으면 미제공으로 모두 치환
+# replace_na(list(salad = '미제공',desert = '미제공',sub_main='미제공', kimchi='미제공'))
+
+```
+- `mutate_all(na_if,")`를 사용하면 공백으로 들어와 있는 모든 값을 NA로 치환합니다.
+- `replace`함수를 사용해서 NA인 것들을 다시 '미제공'이라는 값으로 모두 바꿔줬습니다.
+
+## Menu Feature Engineering
+
+이제부터는 정규표현식이 제대로 쓰입니다. 분류한 기준은 처음에는 조금 뒤죽박죽이지만, 뒤에는 **재료**와 **조리방법**으로 분할하는 방법을 생각했습니다. 이 부분은 얼마나 세부적으로 메뉴를 나누느냐에 따라서 성능이 갈릴 것이라고 예측이 가능합니다. 따라서 좋은 점수를 얻으려면 메뉴를 조금 세분화하는 노가다 작업도 필요한 것 같습니다. :-)
+
+```{r}
+all_lunch %>% 
+  mutate(
+    # 메인종류 1
+    main_type_1 =
+      case_when(
+        grepl(pattern = '바베큐|장육|수육|족발|차돌|폭립|후라이드|윙|육전|보쌈|너비아니|장조림|떡갈비|고기|육|돈육|닭|치킨|목살|불고기|돈|함박|오리|쇠|소고|소세지|갈비|삼겹|삽겹|깐풍|유린기|미트', x = main) ~ '육류',
+        grepl(pattern = '산슬|골뱅이|해물|장어|연어|새우|고등어|삼치|쭈꾸미|꽁치|어|주꾸미|문어|갈치|가자미|낙지|굴비|조기|생선|임연수|동태|명태|코다리', x = main) ~ '해산물',
+        TRUE ~ '기타'),
+    #메인종류 2
+    main_type_2 = 
+      case_when(
+        grepl(pattern = '특식', x = rice1) ~ '특식',
+        main_type_1 == '육류' & grepl(pattern = '바베큐|장육|수육|폭립|차돌|족발|보쌈|돼지|제육|돈육|[^소]불고기|돈|목살|돼지갈비|삼겹|깐풍|유린기|탕수육|두루치기|등갈비|동파육', x = main) ~ '돼지고기',
+        main_type_1 == '육류' & grepl(pattern = '장조림|떡갈비|언양식|소고기|쇠|소불고기|쇠|쇠고기|우육|소갈비', x = main) ~ '소고기',
+        main_type_1 == '육류' & grepl(pattern = '후라이드|윙|닭|치킨', x = main) ~ '닭고기',
+        main_type_1 == '육류' & grepl(pattern = '오리', x = main) ~ '오리고기',
+        main_type_1 == '육류' & grepl(pattern = '미트|소세지|너비아니|함박|완자', x = main) ~ '가공육',
+        main_type_1 == '해산물' & grepl(pattern = '연어|장어|열기|고등어|삼치|꽁치|갈치|가자미|굴비|조기|생선|임연수|동태|명태|코다리', x = main) ~ '생선',
+        main_type_1 == '해산물' & grepl(pattern = '골뱅이|낙지|오징어|쭈꾸미|주꾸미|문어', x = main) ~ '오징어류',
+        main_type_1 == '해산물' & grepl(pattern = '산슬|해물전|찜|홍어|새우|누룽지|볶음|탕수|까스', x = main) ~ '조리해산물',
+        TRUE ~ '기타'),
+    #조리 방법
+    main_cook_type = 
+      case_when(
+        grepl(pattern = '[가-힣]*무침',x = main) ~ '무침',
+        grepl(pattern = '[가-힣]*구이',x = main) ~ '구이',
+        grepl(pattern = '[가-힣]*전',x = main) ~ '전',
+        grepl(pattern = '[가-힣]*조림',x = main) ~ '조림',
+        grepl(pattern = '[가-힣]*볶음',x = main) ~ '볶음',
+        grepl(pattern = '[가-힣]*떡볶이',x = main) ~ '떡볶이',
+        grepl(pattern = '[가-힣]*샐러드',x = main) ~ '샐러드',
+        grepl(pattern = '[가-힣]*말이',x = main) ~ '말이',
+        grepl(pattern = '[가-힣]*잡채',x = main) ~ '잡채',
+        grepl(pattern = '[가-힣]*냉채',x = main) ~ '냉채',
+        grepl(pattern = '[가-힣]*찜',x = main) ~ '찜',
+        grepl(pattern = '[가-힣]*프리타타',x = main) ~ '프리타타',
+        grepl(pattern = '[가-힣]*생채',x = main) ~ '생채',
+        grepl(pattern = '[가-힣*&]*장|[가-힣*&]*장',x = main) ~ '양념/장/소스',
+        grepl(pattern = '가-힣]*쌈',x = main) ~ '쌈',
+        TRUE ~ '기타'
+      ),
+    # 밥 종류
+    rice_type =
+      case_when(
+        grepl(pattern = '[가-힣]*비빔밥',x = rice1) ~ '비빔밥',
+        grepl(pattern = '[가-힣]*볶음밥',x = rice1) ~ '볶음밥',
+        grepl(pattern = '[가-힣]*영양밥',x = rice1) ~ '영양밥',
+        grepl(pattern = '[가-힣]*콩나물밥|[가-힣]*곤드레밥',x = rice1) ~ '콩나물/곤드레밥',
+        grepl(pattern = '[가-힣*]*장',x = rice1) ~ '양념장+밥',
+        grepl(pattern = '[가-힣]*덮밥|[가-힣]*라이스',x = rice1) ~ '덮밥',
+        TRUE ~ '밥'),
+    # 국 종류
+    stew_type = 
+      case_when(
+        grepl(pattern = '[가-힣]*장국',x = stew) ~ '장국',
+        grepl(pattern = '[가-힣]*무국',x = stew) ~ '무국',
+        grepl(pattern = '[가-힣]*찌개',x = stew) ~ '찌개',
+        grepl(pattern = '[가-힣]*탕',x = stew) ~ '탕',
+        grepl(pattern = '[가-힣]*개장',x = stew) ~ '개장',
+        grepl(pattern = '[가-힣]*냉국',x = stew) ~ '냉국',
+        grepl(pattern = '[가-힣]*미역국',x = stew) ~ '미역국',
+        grepl(pattern = '[가-힣]*나물국',x = stew) ~ '나물국',
+        grepl(pattern = '[가-힣]*맑은국',x = stew) ~ '맑은국',
+        grepl(pattern = '[가-힣]*북어',x = stew) ~ '북어',
+        TRUE ~ '기타국'),
+    #서브 메인 타입
+    sub_main1_type=
+      case_when(
+        grepl(pattern = '고기|치킨|돈육|닭|미트볼|소세지|함박|햄|소시지|비엔|동그랑땡',x = sub_main1) ~ '육류',
+        grepl(pattern = '메추리알|계란|두부',x = sub_main1) ~ '계란/두부',
+        grepl(pattern = '굴비|고등어|꽁치|골뱅이|맛살|임연수|갈치|동태|참치|멸치|삼치|홍어|황태|명태',x = sub_main1) ~ '생선류',
+        grepl(pattern = '쭈꾸미|주꾸미|문어|오징어|해물|해파리',x = sub_main1) ~ '오징어류',
+        grepl(pattern = '만두|어묵|',x = sub_main1) ~ '만두|어묵',
+        grepl(pattern = '감자|고구마|옥수수|과일|야채|호박|도라지|무말|브로컬리|녹두|꽈리|고추|콩나물|김치', x= sub_main1) ~ '야채/채소',
+        TRUE ~ '기타'
+      ),
+    #서브 메인 조리 방법
+    sub_main1_cook_type =
+      case_when(
+        grepl(pattern = '[가-힣]*무침',x = sub_main1) ~ '무침',
+        grepl(pattern = '[가-힣]*구이',x = sub_main1) ~ '구이',
+        grepl(pattern = '[가-힣]*전',x = sub_main1) ~ '전',
+        grepl(pattern = '[가-힣]*조림',x = sub_main1) ~ '조림',
+        grepl(pattern = '[가-힣]*볶음',x = sub_main1) ~ '볶음',
+        grepl(pattern = '[가-힣]*떡볶이',x = sub_main1) ~ '떡볶이',
+        grepl(pattern = '[가-힣]*샐러드',x = sub_main1) ~ '샐러드',
+        grepl(pattern = '[가-힣]*말이',x = sub_main1) ~ '말이',
+        grepl(pattern = '[가-힣]*잡채',x = sub_main1) ~ '잡채',
+        grepl(pattern = '[가-힣]*냉채',x = sub_main1) ~ '냉채',
+        grepl(pattern = '[가-힣]*찜',x = sub_main1) ~ '찜',
+        grepl(pattern = '[가-힣]*프리타타',x = sub_main1) ~ '프리타타',
+        grepl(pattern = '[가-힣]*생채',x = sub_main1) ~ '생채',
+        grepl(pattern = '[가-힣*&]*장|[가-힣*&]*소스',x = sub_main1) ~ '양념/장/소스',
+        grepl(pattern = '[가-힣]*쌈',x = sub_main1) ~ '쌈',
+        TRUE ~ '기타'
+      )
+  ) %>% 
+  select(일자,rice_type,stew_type,main_type_1,main_type_2,main_cook_type,
+           sub_main1_type,sub_main1_cook_type, sub_main2,kimchi,desert,salad)-> all_lunch2 
+
+
+```
+
+- 저는 밥의 종류, 국의 종류, 메인디쉬의 종류, 조리 방법, 서브 메인 디쉬의 종류와 조리 방법을 선택해서 작업을 했습니다. 보통 밥과 국(탕), 메인디쉬, 서브메인디쉬 정도만 보고서 그 날 밥이 맛있을지 없을지는 판단 가능하다고 봅니다.
+- `case_when`함수와 `grepl`함수를 사용해서 메뉴를 골랐습니다. `grepl`함수는 일치하는 문자열이 있으면 TRUE, 없으면 FALSE를 반환하는 논리함수입니다.
+
+```{r}
+colnames(all_lunch2)[-1] <- paste("lunch", colnames(all_lunch2)[-1], sep = "_")
+
+all_lunch2 %>% colnames()
+```
+
+- 점심이라고 특정해주기 위해서 **lunch_**라는 suffix를 븥여줬습니다.
+
+# 석식메뉴
+
+---
+
+석식메뉴도 점심과 똑같은 로직을 반복해줍니다. 
+```{r}
+
+## 석식메뉴 프로세싱 (데이터 분할)
+all %>% 
+  pull(석식메뉴) %>%
+  str_replace_all(pattern = '\\([가-힣:,./]+\\)?','') %>% # 원산지 정보 삭제1
+  str_replace_all(pattern = '\\(?[가-힣:,./]+\\)','') %>% # 원산지 정보 삭제2
+  # str_replace_all(pattern = '\\<[가-힣:,./]+\\>','') %>% # 불필요 정보 삭제
+  str_replace_all(pattern = '  ',' ') %>% # 공백 두 개는 하나로
+  str_split(pattern='\\s', simplify = T) %>% # simplify = T -> Matrix로 변환
+  as.tibble()-> all2
+
+### 일자와 하나로 합치기
+all2 <- bind_cols(all %>% select(일자), all2)
+
+
+### v5~v8이 너무 메뉴가 섞여있음
+### 김치 / 디저트 / 샐러드 / 서브메인으로 분할
+all2 %>% 
+  unite('mess_menu',V5:V8, sep='_') %>% 
+  mutate(
+    # 김치 겉절이 깍두기 등
+    kimchi = str_extract(mess_menu, pattern = "[가-힣]+김치|[가-힣]+두기|[가-힣]+겉절이+|[가-힣]+박지"),
+    # 요구르트 식혜 과일류
+    desert = str_extract(mess_menu, pattern = "요구르트|[가-힣]+D|[가-힣]*음료|[가-힣]*호떡|식혜|청포도|바나나|복숭아|오렌지|수박|[가-힣]*토마토|[가-힣]+주스|[가-힣]*아이스티|[가-힣]+빵|[가-힣]*케익|요플레|[가-힣]*츄러스|[가-힣]*화채"),
+    # ~ 샐러드
+    salad = str_extract(mess_menu, pattern = "[가-힣]*샐러드"),
+    # 조림 무침 나물 볶음 등
+    sub_main = str_extract(mess_menu, pattern = "[가-힣]*생채|[가-힣]*무침|[가-힣]*나물|[가-힣]*볶음|[가-힣]*구이|[가-힣]*찜|[가-힣*]+쌈|[가-힣]*조림|[가-힣]*잎지|[가-힣*]*초장|[가-힣]*감자|[가-힣]*고구마|[가-힣]*두부|[가-힣]*말랭이|[가-힣]*파래김|[가-힣]*떡볶이|[가-힣]*부추전|[가-힣]*숙회|[가-힣]*스틱|탕평채|[가-힣]*냉채|[가-힣*]*양념장|[가-힣*]*잡채")
+  ) %>% 
+  select(일자, V1:V4, kimchi, desert, salad, sub_main) -> all2
+
+## 밥,국, main,sub_main, sub_main2, 김치, 샐러드, 디저트로 분류
+
+all2 %>% 
+  mutate(rice1 = str_split_fixed(V1,pattern = '\\/',n=3) %>% .[,1],
+         rice2 = str_split_fixed(V1,pattern = '\\/',n=3) %>% .[,2],
+         rice3 = str_split_fixed(V1,pattern = '\\/',n=3) %>% .[,3],
+         stew = V2,
+         main = V3,
+         sub_main1 = V4,
+         sub_main2 = sub_main
+  ) %>% 
+  select(-c(V1:V4),sub_main) -> all_dinner
+
+all_dinner %>%
+  mutate_all(na_if,"") %>% # ''이면 NA로 치환 
+  skim() 
+
+# NA이거나 ''인 값들은 치환
+all_dinner %>% 
+  mutate_all(na_if,"") %>% # ''이면 NA로 치환 
+  replace(is.na(.), '미제공') -> all_dinner # 값이 없으면 미제공으로 모두 치환
+# replace_na(list(salad = '미제공',desert = '미제공',sub_main='미제공', kimchi='미제공'))
+
+
+# 메뉴 Feature Engineering
+all_dinner %>% 
+  mutate(
+    # 메인종류 1
+    main_type_1 =
+      case_when(
+        grepl(pattern = '바베큐|장육|수육|족발|차돌|폭립|후라이드|윙|육전|보쌈|너비아니|장조림|떡갈비|고기|육|돈육|닭|치킨|목살|불고기|돈|함박|오리|쇠|소고|소세지|갈비|삼겹|삽겹|깐풍|유린기|미트', x = main) ~ '육류',
+        grepl(pattern = '산슬|골뱅이|해물|장어|연어|새우|고등어|삼치|쭈꾸미|꽁치|어|주꾸미|문어|갈치|가자미|낙지|굴비|조기|생선|임연수|동태|명태|코다리', x = main) ~ '해산물',
+        TRUE ~ '기타'),
+    #메인종류 2
+    main_type_2 = 
+      case_when(
+        grepl(pattern = '특식', x = rice1) ~ '특식',
+        main_type_1 == '육류' & grepl(pattern = '바베큐|장육|수육|폭립|차돌|족발|보쌈|돼지|제육|돈육|[^소]불고기|돈|목살|돼지갈비|삼겹|깐풍|유린기|탕수육|두루치기|등갈비|동파육', x = main) ~ '돼지고기',
+        main_type_1 == '육류' & grepl(pattern = '장조림|떡갈비|언양식|소고기|쇠|소불고기|쇠|쇠고기|우육|소갈비', x = main) ~ '소고기',
+        main_type_1 == '육류' & grepl(pattern = '후라이드|윙|닭|치킨', x = main) ~ '닭고기',
+        main_type_1 == '육류' & grepl(pattern = '오리', x = main) ~ '오리고기',
+        main_type_1 == '육류' & grepl(pattern = '미트|소세지|너비아니|함박|완자', x = main) ~ '가공육',
+        main_type_1 == '해산물' & grepl(pattern = '연어|장어|열기|고등어|삼치|꽁치|갈치|가자미|굴비|조기|생선|임연수|동태|명태|코다리', x = main) ~ '생선',
+        main_type_1 == '해산물' & grepl(pattern = '골뱅이|낙지|오징어|쭈꾸미|주꾸미|문어', x = main) ~ '오징어류',
+        main_type_1 == '해산물' & grepl(pattern = '산슬|해물전|찜|홍어|새우|누룽지|볶음|탕수|까스', x = main) ~ '조리해산물',
+        TRUE ~ '기타'),
+    #조리 방법
+    main_cook_type = 
+      case_when(
+        grepl(pattern = '[가-힣]*무침',x = main) ~ '무침',
+        grepl(pattern = '[가-힣]*구이',x = main) ~ '구이',
+        grepl(pattern = '[가-힣]*전',x = main) ~ '전',
+        grepl(pattern = '[가-힣]*조림',x = main) ~ '조림',
+        grepl(pattern = '[가-힣]*볶음',x = main) ~ '볶음',
+        grepl(pattern = '[가-힣]*떡볶이',x = main) ~ '떡볶이',
+        grepl(pattern = '[가-힣]*샐러드',x = main) ~ '샐러드',
+        grepl(pattern = '[가-힣]*말이',x = main) ~ '말이',
+        grepl(pattern = '[가-힣]*잡채',x = main) ~ '잡채',
+        grepl(pattern = '[가-힣]*냉채',x = main) ~ '냉채',
+        grepl(pattern = '[가-힣]*찜',x = main) ~ '찜',
+        grepl(pattern = '[가-힣]*프리타타',x = main) ~ '프리타타',
+        grepl(pattern = '[가-힣]*생채',x = main) ~ '생채',
+        grepl(pattern = '[가-힣*&]*장|[가-힣*&]*장',x = main) ~ '양념/장/소스',
+        grepl(pattern = '가-힣]*쌈',x = main) ~ '쌈',
+        TRUE ~ '기타'
+      ),
+    # 밥 종류
+    rice_type =
+      case_when(
+        grepl(pattern = '[가-힣]*비빔밥',x = rice1) ~ '비빔밥',
+        grepl(pattern = '[가-힣]*볶음밥',x = rice1) ~ '볶음밥',
+        grepl(pattern = '[가-힣]*영양밥',x = rice1) ~ '영양밥',
+        grepl(pattern = '[가-힣]*콩나물밥|[가-힣]*곤드레밥',x = rice1) ~ '콩나물/곤드레밥',
+        grepl(pattern = '[가-힣*]*장',x = rice1) ~ '양념장+밥',
+        grepl(pattern = '[가-힣]*덮밥|[가-힣]*라이스',x = rice1) ~ '덮밥',
+        TRUE ~ '밥'),
+    # 국 종류
+    stew_type = 
+      case_when(
+        grepl(pattern = '[가-힣]*장국',x = stew) ~ '장국',
+        grepl(pattern = '[가-힣]*무국',x = stew) ~ '무국',
+        grepl(pattern = '[가-힣]*찌개',x = stew) ~ '찌개',
+        grepl(pattern = '[가-힣]*탕',x = stew) ~ '탕',
+        grepl(pattern = '[가-힣]*개장',x = stew) ~ '개장',
+        grepl(pattern = '[가-힣]*냉국',x = stew) ~ '냉국',
+        grepl(pattern = '[가-힣]*미역국',x = stew) ~ '미역국',
+        grepl(pattern = '[가-힣]*나물국',x = stew) ~ '나물국',
+        grepl(pattern = '[가-힣]*맑은국',x = stew) ~ '맑은국',
+        grepl(pattern = '[가-힣]*북어',x = stew) ~ '북어',
+        TRUE ~ '기타국'),
+    #서브 메인 타입
+    sub_main1_type=
+      case_when(
+        grepl(pattern = '고기|치킨|돈육|닭|미트볼|소세지|함박|햄|소시지|비엔|동그랑땡',x = sub_main1) ~ '육류',
+        grepl(pattern = '메추리알|계란|두부',x = sub_main1) ~ '계란/두부',
+        grepl(pattern = '굴비|고등어|꽁치|골뱅이|맛살|임연수|갈치|동태|참치|멸치|삼치|홍어|황태|명태',x = sub_main1) ~ '생선류',
+        grepl(pattern = '쭈꾸미|주꾸미|문어|오징어|해물|해파리',x = sub_main1) ~ '오징어류',
+        grepl(pattern = '만두|어묵|',x = sub_main1) ~ '만두|어묵',
+        grepl(pattern = '감자|고구마|옥수수|과일|야채|호박|도라지|무말|브로컬리|녹두|꽈리|고추|콩나물|김치', x= sub_main1) ~ '야채/채소',
+        TRUE ~ '기타'
+      ),
+    #서브 메인 조리 방법
+    sub_main1_cook_type =
+      case_when(
+        grepl(pattern = '[가-힣]*무침',x = sub_main1) ~ '무침',
+        grepl(pattern = '[가-힣]*구이',x = sub_main1) ~ '구이',
+        grepl(pattern = '[가-힣]*전',x = sub_main1) ~ '전',
+        grepl(pattern = '[가-힣]*조림',x = sub_main1) ~ '조림',
+        grepl(pattern = '[가-힣]*볶음',x = sub_main1) ~ '볶음',
+        grepl(pattern = '[가-힣]*떡볶이',x = sub_main1) ~ '떡볶이',
+        grepl(pattern = '[가-힣]*샐러드',x = sub_main1) ~ '샐러드',
+        grepl(pattern = '[가-힣]*말이',x = sub_main1) ~ '말이',
+        grepl(pattern = '[가-힣]*잡채',x = sub_main1) ~ '잡채',
+        grepl(pattern = '[가-힣]*냉채',x = sub_main1) ~ '냉채',
+        grepl(pattern = '[가-힣]*찜',x = sub_main1) ~ '찜',
+        grepl(pattern = '[가-힣]*프리타타',x = sub_main1) ~ '프리타타',
+        grepl(pattern = '[가-힣]*생채',x = sub_main1) ~ '생채',
+        grepl(pattern = '[가-힣*&]*장|[가-힣*&]*소스',x = sub_main1) ~ '양념/장/소스',
+        grepl(pattern = '[가-힣]*쌈',x = sub_main1) ~ '쌈',
+        TRUE ~ '기타'
+      ) 
+  ) %>% 
+  select(일자,rice_type,stew_type,main_type_1,main_type_2,main_cook_type,
+           sub_main1_type,sub_main1_cook_type, sub_main2,kimchi,desert,salad) -> all_dinner2
+
+colnames(all_dinner2)[-1] <- paste("dinner", colnames(all_dinner2)[-1], sep = "_")
+
+all_dinner2
+
+```
+
+# 중식 석식 합치기
+
+---
+
+마지막으로 중식과 석식을 **일자** 기준으로 원본 데이터에 `left_join`합니다.
+```{r}
+all %>% 
+  select(-c(석식메뉴,중식메뉴)) %>% 
+  left_join(all_lunch2, by = '일자') %>% 
+  left_join(all_dinner2, by = '일자') -> all_final
+
+### data check
+all_final %>% skim()
+colnames(all_final)
+
+```
+
+# 간단한 EDA
+
+---
+
+간단한 EDA로 지금까지 만든 데이터를 살펴보겠습니다.
+
+```{r}
+## Hist : 중식계
+all_final[1:nrow(train), ] %>% 
+  ggplot(aes(x=중식계)) +
+  geom_histogram()
+```
+
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+
+## Bar Chart: Main - 중식계
+v1 <- all_final[1:nrow(train), ] %>% 
+  ggplot(aes(x = as.factor(lunch_main_type_1), y=중식계))+
+  geom_bar(stat = 'summary', fun.y = 'mean')
+
+v2 <- all_final[1:nrow(train), ] %>% 
+  ggplot(aes(x = as.factor(lunch_main_type_2), y=중식계))+
+  geom_bar(stat = 'summary', fun.y = 'mean')
+
+## Bar Chart : rice, submain - 중식계
+v3 <- all_final[1:nrow(train), ] %>% 
+  ggplot(aes(x = as.factor(lunch_rice_type), y=중식계))+
+  geom_bar(stat = 'summary', fun.y = 'mean')
+
+v4 <- all_final[1:nrow(train), ] %>% 
+  ggplot(aes(x = as.factor(lunch_sub_main1_type), y=중식계))+
+  geom_bar(stat = 'summary', fun.y = 'mean')
+
+```
+
+```{r}
+grid.arrange(v1,v2,v3,v4, ncol=1)
+```
+
+# 결론
+
+---
+
+## 정규표현식이 핵심이다.
+이번 분석에서는 거의 정규표현식과 `stringr`패키지를 중점적으로 사용한 것 같습니다. 결국 머신러닝을 하기 위해서는 NLP로 모든 형태소 단위로 푸는 방법보다 위에서 수행한 방법처럼 조금 더 간단한 방법이 선행되어야 할 것 같네요. 그 외 NLP를 활용해서 tabular 데이터를 만들 수 있는 좋은 예가 있으면 공유 부탁드립니다.
+
+## 텍스트 데이터는 노가다와 성능이 비례관계에 있는 듯하다.
+이전에 챗봇 연구하시는 분에게도 들은 적이 있는데, 챗봇에게 새로운 단어를 가르치는 것은 결국 그 단어를 입력해주는 사람이라는 이야기를 들었습니다.(봇은 인간이었습니다..) 그런 의미에서 이런 형태의 분석 역시 노가다의 성질을 띄고 있습니다. 하지만, **식당 메뉴**라는 카테고리가 한정되어 있기 때문에, 조금만 노력을 기울이면 식당에서 나오는 메뉴를 잘 분류하여 좋은 데이터셋을 만들 수 있을 것 같다는 생각이 듭니다. 이상입니다. 감사합니다!
