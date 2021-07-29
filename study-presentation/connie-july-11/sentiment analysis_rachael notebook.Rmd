@@ -1,0 +1,285 @@
+---
+title: "Sentiment Analysis_Rachael Tatman"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction
+### What is sentiment analysis
+
+감성분석이란 텍스트에서 표현하는 감정을 자동으로 분석하는 과정.
+감정분석은 종종 binary(긍정vs부정) 프레임으로 이루어지기도 하지만, 두려움, 기쁨, 분노 등 특정 감정을 좀 더 세밀하게 분석하는 작업(fine-grained)이 되기도 한다.
+
+특히 감정분석은 Business Intelligence에서 많은 어플리케이션에 사용된다.
+감성 분석 응용 프로그램의 예:
+
+* 특정 주제에 대한 sns의 토론 분석
+* 설문조사 응답 평가
+* 상품 리뷰에 대해 긍정적, 부정적인지 결정하기
+
+감정 분석은 완벽하지 않으며 글을 쓴 사람이 어떤 특정 감정을 왜 느꼈는지 말해주지 않지만, 텍스트의 일부 특성을 빠르게 요약하는 것에 유용할 수 있다.(특히, 텍스트가 너무 많아서 모든 텍스트를 분석할 수 없는 경우)
+
+
+### How does it work?
+
+1. 강한 긍정 혹은 부정적인 감정과 연관된 단어의 리스트를 찾거나 만들기
+2. 텍스트에서 긍정적이고 부정적인 단어의 수를 카운트하기
+3. 긍정적인 단어와 부정적인 단어의 혼합 분석하기. 많은 긍정적인 단어와 적은 부정적인 단어는 긍정적인 감정을 나타내고, 많은 부정적인 단어와 적은 긍정적인 단어는 부정적인 감정을 나타냄
+
+
+특정 상황이나 주제에서는 단어 리스트에 특정 텍스트를 추가하거나 수정해야 할 수 있음. 
+
+
+## Tutorial
+
+dataset: 매년 의회에서 하는 미 대통령의 연설문 1989년부터 2017년까지의 데이터.
+
+<참고>
+https://www.kaggle.com/rtatman/tokenization-tutorial
+https://bkshin.tistory.com/entry/NLP-2-%ED%85%8D%EC%8A%A4%ED%8A%B8-%ED%86%A0%ED%81%B0%ED%99%94Text-Tokenization
+https://www.tidytextmining.com/sentiment.html
+
+
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(glue)
+library(stringr)
+
+```
+
+
+```{r}
+files<- list.files("dataset/")
+
+#파일경로&1st file 이름 이어붙이기
+fileName<- glue("dataset/", files[1], sep = "")
+fileName<- trimws(fileName)
+fileName
+
+
+
+
+
+teststr<- c("This is!            ", "test.    ")
+trimws(teststr)
+trimws(teststr, "l")
+
+```
+
+* Sentence Tokenization
+e.g.) Hello! This is Connie. -> Hello! / This is Connie
+
+* Word Tokenization
+e.g.) Hello! This is Connie. -> Hello! / This / is / Connie
+
+```{r}
+#read in new file
+fileText<- glue(read_file(fileName))
+
+#remove any dollar signs
+fileText<- gsub("\\$", "", fileText)
+
+#tokenize
+
+tokens <- data_frame(text=fileText) %>% 
+    unnest_tokens(word, text) # 텍스트를 개별 토큰으로 분해: 각 행에 한 개의 토큰이 입력됨
+
+
+
+
+```
+
+
+토큰과 리스트의 단어 비교
+
+
+```{r}
+get_sentiments("bing") #tidytext패키지에 있는 "bing"이라는 단어 리스트 사용
+
+tokens %>%
+    inner_join(get_sentiments("bing")) %>% #pull out only sentiment words
+    count(sentiment) %>%
+    spread(sentiment, n, fill=0) %>%
+    mutate(sentiment= positive - negative)
+
+```
+
+```{r}
+get_sentiments("bing") #tidytext패키지에 있는 "bing"이라는 단어 리스트 사용
+
+
+
+tokens %>%
+    inner_join(get_sentiments("bing")) %>% #pull out only sentiment words
+    count(sentiment) %>%
+    spread(sentiment, n, fill=0) %>%
+    mutate(sentiment= positive - negative) %>%
+    mutate(year = as.numeric(str_match(fileName, "\\d{4}"))) %>%
+    mutate(president = str_match(fileName, "/(.*?)_")[2])
+
+
+
+```
+
+
+
+
+```{r}
+GetSentiment<- function(file){
+    fileName <- glue("dataset/", file, sep="")
+    fileName <- trimws(fileName)
+    
+    fileText <- glue(read_file(fileName))
+    fileText <- gsub("\\$", "", fileText)
+    
+    tokens <- data_frame(text = fileText) %>%
+        unnest_tokens(word, text)
+    
+    sentiment <- tokens %>%
+        inner_join(get_sentiments("bing")) %>%
+        count(sentiment) %>%
+        spread(sentiment, n, fill = 0) %>%
+        mutate(sentiment = positive - negative) %>%
+        mutate(file = file) %>%
+        mutate(year = as.numeric(str_match(file, "\\d{4}"))) %>%
+        mutate(president = str_match(file, "(.*?)_")[2])
+    
+    return(sentiment)
+        
+    
+}
+
+
+GetSentiment(files[1])
+
+
+try(GetSentiment(files[195]), silent=TRUE)
+
+
+```
+
+
+```{r}
+
+data("sentiments")
+# sentiments %>% filter(sentiment =="positive")
+
+add<- data.frame(word = c("preservation", "peace"),
+           sentiment = c("positive", "positive"))
+
+sentiments<- rbind(sentiments, add)
+sentiments %>% filter(word =="preservation")
+
+
+sentiments <- tibble() #tibble을 다시 해주는 이유는? 
+
+
+for(i in files){
+    try(sentiments <- rbind(sentiments, GetSentiment(i)),silent=TRUE)
+}
+#trycatch? 안댐
+# tryCatch(
+#   f(),
+#   error = function(e){
+#     print(e)
+#  })
+
+
+```
+
+
+
+Bush Sr. / George W. Bush 구분하기
+
+```{r}
+
+
+bushSr<- sentiments %>%
+    filter(president == "Bush") %>%
+    filter(year<2000) %>%
+    mutate(president = "Bush Sr.")
+
+
+sentiments <- anti_join(sentiments,
+                        sentiments[sentiments$president=="BUSH" & sentiments$year <2000,])
+
+sentiments <- full_join(sentiments, bushSr)
+
+```
+
+plot
+
+```{r}
+ggplot(sentiments, aes(x=as.numeric(year), y=sentiment)) +
+    geom_point(aes(color=president))+
+    geom_smooth(method="auto")
+
+
+
+
+
+```
+
+
+
+
+```{r}
+ggplot(sentiments, aes(x=president, y=sentiment, color=president))+
+    geom_boxplot()
+
+```
+
+
+민주당, 공화당별 차이를 확인
+```{r}
+
+sentiments<- sentiments %>% 
+    filter(president == c("Clinton", "Obama", "Carter", "Trump", "Bush", "BushSr."))
+
+
+
+democrats<- sentiments %>%
+    filter(president ==c("Clinton", "Obama", "Carter")) %>%
+    mutate(party="D")
+
+
+republicans <- sentiments %>%
+    filter(president != "Clinton" & president != "Obama" & president != "Carter") %>%
+    mutate(party = "R")
+
+
+byParty<- full_join(democrats, republicans)
+t.test(democrats$sentiment, republicans$sentiment)
+
+ggplot(byParty, aes(x=party, y=sentiment, color=party))+
+    geom_boxplot()+
+    geom_point()
+
+
+```
+
+
+염두에 둘 몇 가지 사항:
+
+* 문서의 길이를 수정하지 않았음. 민주당 대통령의 연설이 상대적으로 공화당의 연설문보다 더 길기 때문에 더 긍정적인 단어가 많이 포함되어 있었다고 생각할 수 있음.
+
+* 이 분석은 political lanuage를 분석하기 위해 설정된 것이 아닌 일반적인 단어 목록을 사용한 결과이고, 한 가지의 단어 리스트만 사용했다는 점도 염두에 두어야 함. 
+
+
+
+
+
+
+
+
+
+
+
+
+
