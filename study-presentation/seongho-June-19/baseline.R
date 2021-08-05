@@ -266,11 +266,18 @@ train_base_dinner<-train_base_dinner %>% select(-c(조식메뉴,중식메뉴,석
 test_base_dinner<-test_base_dinner %>% select(-c(조식메뉴,중식메뉴,석식메뉴))
 
 
+# CPU가 여러개 있을 경우에 활용
+
+cores <- parallel::detectCores()
+cores
+
 set.seed(125)
 rf_mod <- 
   rand_forest() %>% 
   set_mode("regression") %>% 
-  set_engine("ranger", importance = 'impurity') 
+  set_engine("ranger",
+             num.threads = cores,
+             importance = 'impurity') 
 #importance = "impurity" , "permutation" 설정해야 vip() 가능
 rf_wf <- 
   workflow() %>% 

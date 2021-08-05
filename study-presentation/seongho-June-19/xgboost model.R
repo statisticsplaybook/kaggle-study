@@ -2,10 +2,16 @@
 
 #### XGBoost - basic
 
+cores <- parallel::detectCores()
+cores
+
 set.seed(125)
 xgb_mod <- boost_tree() %>% 
   set_mode("regression") %>% 
-  set_engine("xgboost")
+  set_engine("xgboost",
+             num.threads = cores)
+
+
 xgb_wf_lunch <- 
   workflow() %>% 
   add_model(xgb_mod) %>% 
