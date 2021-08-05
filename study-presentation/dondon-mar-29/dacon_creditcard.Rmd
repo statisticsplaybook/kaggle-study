@@ -1,0 +1,622 @@
+---
+title: "dacon_creditcard"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center")
+```
+
+# Preparations {.tabset .tabset-fade}
+
+## Libraries
+
+```{r load_lib, message=FALSE, warning=FALSE, results='hide'}
+library(tidymodels)
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(magrittr)
+library(data.table)
+library(gridExtra)
+library(themis)
+library(ggmosaic)
+library(tabnet)
+library(torch)
+library(embed)
+theme_set(theme_bw())
+library(stacks)
+```
+
+## Data load
+
+```{r}
+file_path <- 'C:/Users/sangdon/Desktop/dacon_creditcard/open/open'
+files <- list.files(file_path)
+files
+```
+
+```{r, message=FALSE}
+train <- read_csv(file.path(file_path, "train.csv")) %>% janitor::clean_names()
+test <- read_csv(file.path(file_path, "test.csv")) %>% janitor::clean_names()
+```
+
+# Data overview (데이터 기본정보) {.tabset .tabset-fade}
+
+## train data
+
+```{r}
+head(train)
+skim(train)
+```
+
+## test data
+
+```{r}
+head(test)
+skim(test)
+```
+
+# data preprocessing {.tabset .tabset-fade}
+
+## Change variable type
+
+```{r}
+cols1 <- colnames(train)[c(13:18, 20)]
+train %>% 
+    mutate_if(is.character, as.factor) %>% 
+    mutate_at(cols1, funs(factor(.))) -> train
+
+cols2 <- colnames(train)[c(13:18)]
+test %>% 
+    mutate_if(is.character, as.factor) %>% 
+    mutate_at(cols2, funs(factor(.))) -> test
+```
+
+## change date variable
+
+days_birth : 출생일(-1이면 데이터 수집일 하루 전에 태어났음을 의미) days_employed : 업무 시작일(-1이면 데이터 수집일 하루 전부터 일을 시작했음을 의미) begin_month : 신용카드 발급 월(-1은 데이터 수집일 한 달 전에 신용카드를 발급했음을 의미)
+
+```{r}
+
+ymd_rec <- train %>% 
+  recipe(credit~.) %>% 
+  step_mutate(
+              days_birth = days_birth + 25152, # 출생일
+              days_employed = days_employed + 15713, # 업무 시작일  
+              begin_month = begin_month + 60) %>% 
+  step_mutate(
+              year_birth = round(days_birth/365), 
+              month_birth = round(days_birth/30), 
+              year_employed = round(days_employed/365),
+              month_employed = round(days_employed/30), 
+              begin_year = begin_month/12) %>% 
+  prep(training = train) 
+
+train_eda <- juice(ymd_rec)
+```
+
+# date variable visualization {.tabset .tabset-fade}
+
+## month_employed : 업무 시작달
+
+```{r}
+a1 <- train_eda %>% 
+  ggplot(aes(x = month_employed)) + geom_histogram(bins = 100)
+
+a2 <- train_eda %>% 
+  filter(month_employed != 12699) %>% 
+  ggplot(aes(x = month_employed)) + geom_histogram(bins = 100)
+
+grid.arrange(a1, a2)
+```
+
+## month_employed == 12699 : 퇴직자의 경우
+
+```{r}
+train_eda %>% 
+  filter(month_employed == 12699) %>% 
+  ggplot(aes(x = credit)) + geom_bar()+
+  geom_label(stat = 'count', aes(label = ..count..))
+
+train_eda %>% 
+  filter(month_employed == 12699) %>% 
+  ggplot(aes(x = income_total)) + geom_histogram(bins = 50)
+```
+
+## discretize month_employed
+
+```{r}
+train_eda %>% 
+  select(month_employed) %>% 
+  filter(month_employed!=12699) %>% 
+  summary()
+
+train_eda %>% 
+  recipe(credit~.) %>%
+  step_mutate(discrize_employed = month_employed) %>% 
+  step_cut(discrize_employed, breaks = c(407, 458, 491, 523, 12699)) %>% 
+  prep(training = train_eda) %>% 
+  bake(new_data = train_eda) %>% 
+  ggplot(aes(x = discrize_employed)) + geom_bar() +  
+  geom_label(stat = 'count', aes(label = ..count..))
+
+```
+
+## discretization 기준
+
+특정 구간과 credit 간의 상관 관계가 가장 큰 구간을 선택할 필요가 있음. 카이제곱 통계량이 가장 큰 구간을 상관 관계가 가장 큰 구간이라고 생각하는 것이 합리적? 모형기반 : cart, xgb 기반으로 쪼갤 수도 있음. y에 연관성이 들어가는게 합리적?
+
+embed::step_discretize_cart, step_discretize_xgb\
+<https://embed.tidymodels.org/reference/step_discretize_cart.html>
+
+```{r}
+train_eda %>% 
+  recipe(credit~.) %>%
+  step_mutate(disc_employed = month_employed) %>% 
+  step_cut(disc_employed, breaks = c(407, 458, 491, 523, 12699)) %>% 
+  prep(training = train_eda) %>% 
+  bake(new_data = train_eda) %>% 
+  select(disc_employed, credit) %>% 
+  table() %>% 
+  chisq.test()
+```
+
+## year_birth
+
+```{r}
+train_eda$year_birth %>% summary()
+train_eda %>% 
+  ggplot(aes(x=year_birth)) + geom_histogram()
+
+train_eda %>% 
+  recipe(credit~.) %>%
+  step_mutate(disc_birth = year_birth) %>% 
+  step_cut(disc_birth, breaks = c(10, 20, 30, 40)) %>% 
+  prep(training = train_eda) %>% 
+  bake(new_data = train_eda) %>% 
+  select(disc_birth) %>% 
+  ggplot(aes(x = disc_birth)) + geom_bar()+
+  geom_label(stat = 'count', aes(label = ..count..))
+  
+
+```
+
+## begin_month : 신용카드 발급 이후 몇달이 지났는지(begin_year : 신용카드 발급 후 몇년이 지났는지)
+
+```{r}
+train_eda %>% 
+  ggplot(aes(x = begin_month)) + geom_histogram()
+
+train_eda$begin_month %>% summary()
+train_eda$begin_year %>% summary()
+
+train_eda %>% 
+  recipe(credit~.) %>%
+  step_mutate(disc_begin = begin_year) %>% 
+  step_cut(disc_begin, breaks = c(1, 2, 3, 4)) %>% 
+  prep(training = train_eda) %>% 
+  bake(new_data = train_eda) %>% 
+  select(disc_begin) %>% 
+  ggplot(aes(x = disc_begin)) + geom_bar()+
+  geom_label(stat = 'count', aes(label = ..count..))
+```
+
+# Univariate visualization {.tabset .tabset-fade}
+
+## income_type : 소득 분류
+
+commercial associate, pensioner(연금 수급자), state servant(공무원), student, working
+
+```{r}
+train_eda %>% 
+  ggplot(aes(x = income_type)) + geom_bar() + 
+  aes(stringr::str_wrap(income_type, 15)) + 
+  xlab('income_type')+
+  geom_label(stat = 'count', aes(label = ..count..))
+
+train_eda %>% 
+  ggplot(aes(x = income_type, y = income_total)) + 
+  geom_boxplot(aes(fill = income_type)) 
+
+train_eda %>% 
+  filter(!is.na(income_type), !is.na(credit)) %>% 
+  ggplot()+geom_mosaic(aes(x = product(income_type, credit), fill = income_type))
+
+```
+
+## house_type : 생활 방식
+
+co-op apartment(주택 협동조합), house apartment, municipal apartment(공공 주택), office apartment(회사), rented apartment(임대 주택), with parents
+
+```{r}
+train_eda %>% 
+  ggplot(aes(x = house_type)) + geom_bar() + 
+  aes(stringr::str_wrap(house_type, 15)) + 
+  xlab('house_type')+
+  geom_label(stat = 'count', aes(label = ..count..))
+
+train_eda %>% 
+  ggplot(aes(x = house_type, y = income_total)) + 
+  aes(stringr::str_wrap(house_type, 15)) +
+  xlab('house_type')+
+  geom_boxplot(aes(fill = house_type)) 
+  
+
+train_eda %>% 
+  filter(!is.na(house_type), !is.na(credit)) %>% 
+  ggplot()+geom_mosaic(aes(x = product(house_type, credit), fill = house_type))
+
+```
+
+## email
+
+```{r}
+train_eda %>% 
+  ggplot(aes(x = email)) + geom_bar() + 
+  geom_label(stat = 'count', aes(label = ..count..))
+
+train_eda %>% 
+  ggplot(aes(x = email, y = income_total, fill = email)) + geom_boxplot()
+
+train_eda %>% 
+  filter(!is.na(email), !is.na(credit)) %>% 
+  ggplot()+geom_mosaic(aes(x = product(email, credit), fill = email))
+
+```
+
+## occupation type
+
+accountants, cleaning staff, cooking staff, core staff(정규직), drivers, high skill tech staff, HR staff, IT staff, Laborers, Low-skill Laborers, managers, medicine staff
+
+```{r}
+train_eda %>% 
+  ggplot(aes(x = occyp_type)) + geom_bar() + 
+  geom_label(stat = 'count', aes(label = ..count..))+
+  coord_flip()
+
+
+train_eda %>% 
+  filter(!is.na(occyp_type), !is.na(credit)) %>% 
+  ggplot(aes(x = occyp_type, y = income_total, fill = occyp_type)) + 
+  geom_boxplot() + 
+  coord_flip()
+
+train_eda %>% 
+  filter(!is.na(occyp_type), !is.na(credit)) %>% 
+  ggplot()+geom_mosaic(aes(x = product(occyp_type, credit), fill =occyp_type))
+
+```
+
+# Recipe
+
+```{r}
+model_rec <- train %>% 
+  recipe(credit~.) %>%
+  step_rm(flag_mobil, index, ) %>% 
+  step_mutate(
+              days_birth = days_birth + 25152, # 출생일
+              days_employed = days_employed + 15713, # 업무 시작일  
+              begin_month = begin_month + 60) %>% 
+  step_mutate(
+              year_birth = round(days_birth/365), 
+              month_birth = round(days_birth/30), 
+              year_employed = round(days_employed/365),
+              month_employed = round(days_employed/30), 
+              begin_year = begin_month/12) %>%
+  step_mutate(
+              disc_employed = month_employed, 
+              disc_birth = year_birth, 
+              disc_begin = begin_year) %>%
+  
+  step_cut(disc_birth, breaks = c(10, 20, 30, 40)) %>% 
+  step_cut(disc_employed, breaks = c(407, 458, 491, 523, 12699)) %>%
+  step_cut(disc_begin, breaks = c(1, 2, 3, 4)) %>% 
+  
+  step_other(income_type, occyp_type, house_type, threshold = 0.1, other = 'infreq_combined') %>% 
+  step_impute_bag(occyp_type, impute_with = imp_vars(car, reality, income_total, income_type, edu_type, house_type, family_type, family_size),  trees = 100) %>% 
+  step_dummy(all_nominal(), -credit, one_hot = TRUE) %>%
+  step_normalize(all_numeric(), -all_outcomes()) %>% 
+  step_rm(days_birth, days_employed) %>% 
+  prep(training = train)
+  #step_smote(credit, over_ratio = tune()) 
+
+# upsampling tuning : https://konradsemsch.netlify.app/2019/10/testing-the-tune-package-from-tidymodels-analysing-the-relationship-between-the-upsampling-ratio-and-model-performance/
+
+```
+
+```{r}
+train2 <- juice(model_rec)
+test2 <- bake(model_rec, new_data = test)
+```
+
+```{r}
+set.seed(20210423)
+vb_folds <- vfold_cv(train2, v = 3, strata = credit)
+```
+
+```{r}
+ctrl_grid <- control_stack_grid()
+```
+
+# randomforest setting {.tabset .tabset-fade}
+
+## randomforest hyperparameter setting
+
+```{r}
+rf_spec <- rand_forest(
+  mtry = tune(), 
+  trees = 1000, 
+  min_n = tune()
+) %>% 
+  set_mode('classification') %>% 
+  set_engine('ranger')
+```
+
+## workflow model setting
+
+```{r}
+rf_wf <- workflow() %>% 
+    add_formula(credit~.) %>% 
+    add_model(rf_spec)
+```
+
+## hyperparameter 튜닝
+
+```{r}
+library(tictoc)
+tic()
+doParallel::registerDoParallel()
+set.seed(1234)
+
+rf_res <- tune_grid(
+    rf_wf,  
+    resamples = vb_folds, 
+    grid = 5,
+    metrics = metric_set(mn_log_loss), 
+    control = ctrl_grid    
+)
+toc() # 2270.45
+# mtry : 58, min_n = 14
+```
+
+## Final model update
+
+```{r}
+best_param_rf <- select_best(rf_res) 
+final_rf <- finalize_workflow(rf_wf, best_param_rf)
+final_rf
+```
+
+## final model setting
+
+```{r}
+final_rf_model <- finalize_model(rf_spec, best_param_rf) 
+final_rf_model 
+```
+
+## final model workflow에 업데이트
+
+```{r}
+final_rf_workflow <- rf_wf %>% update_model(final_rf_model)
+```
+
+## final model 학습
+
+```{r}
+rf_fit <- fit(final_rf_workflow, data = train2)
+```
+
+# Result {.tabset .tabset-fade}
+
+## Prediction
+
+```{r}
+pred_rf <- 
+    predict(rf_fit, test2, type = 'prob')
+pred_rf %>% head() 
+
+```
+
+# XGboost setting {.tabset .tabset-fade}
+
+## XGBOOST hyperparameter setting
+
+```{r}
+xgb_spec <- boost_tree(
+    trees = 1000,  
+    tree_depth = tune(),  
+    min_n = tune(), 
+    loss_reduction = tune(),  
+    sample_size = tune(), 
+    mtry = tune(),  
+    learn_rate = tune()
+) %>% 
+    set_engine('xgboost') %>%  
+    set_mode('classification')
+```
+
+# XGboost workflow {.tabset .tabset-fade}
+
+## workflow model setting
+
+```{r}
+xgb_wf <- workflow() %>% 
+    add_formula(credit~.) %>% 
+    add_model(xgb_spec)
+```
+
+## Grid search
+
+```{r}
+xgb_grid <- grid_latin_hypercube(
+    tree_depth(), 
+    min_n(), 
+    loss_reduction(), 
+    sample_size = sample_prop(), 
+    finalize(mtry(), train2), 
+    learn_rate(), 
+    size = 10
+)
+```
+
+## hyperparameter 튜닝
+
+```{r}
+library(tictoc)
+tic()
+doParallel::registerDoParallel()
+set.seed(1234)
+
+xgb_res <- tune_grid(
+    xgb_wf,  
+    resamples = vb_folds, 
+    grid = xgb_grid, 
+    metrics = metric_set(mn_log_loss),
+    control = ctrl_grid    
+)
+toc()  # 1396.34 sec 
+```
+
+## Final model update
+
+```{r}
+best_param_xgb <- select_best(xgb_res)
+final_xgb <- finalize_workflow(xgb_wf, best_param_xgb)
+```
+
+## final model setting
+
+```{r}
+final_model <- finalize_model(xgb_spec, best_param_xgb) 
+```
+
+## final model workflow에 업데이트
+
+```{r}
+final_xgb_workflow <- xgb_wf %>% update_model(final_model)
+```
+
+## final model 학습
+
+```{r}
+xgb_fit <- fit(final_xgb_workflow, data = train2)
+```
+
+# Result {.tabset .tabset-fade}
+
+## Prediction
+
+```{r}
+pred_xgb <- 
+    predict(xgb_fit, test2, type = 'prob') 
+pred_xgb %>% head()
+
+```
+
+## feature importance plot
+
+```{r}
+library(vip) 
+final_xgb %>% 
+    fit(data = train2) %>%   
+    pull_workflow_fit() %>% 
+    vip(geom = 'point') 
+```
+
+# regularized multinomial regression
+
+```{r}
+multi_spec <- multinom_reg(mode = "classification",
+    penalty = tune(), 
+    mixture = tune()) %>%
+    set_engine("glmnet") 
+```
+
+```{r}
+lambda_grid <- grid_max_entropy(parameters(penalty(), mixture()), size = 50)
+```
+
+```{r}
+multi_wf <- workflow() %>%
+  add_model(multi_spec) %>% 
+  add_formula(credit ~ .)
+```
+
+```{r}
+multi_spec_tbl <- tune_grid(
+  multi_wf, 
+  model = multi_spec, 
+  resamples = vb_folds, 
+  grid = lambda_grid, 
+  metrics = metric_set(mn_log_loss),
+  control = ctrl_grid
+)
+multi_spec_tbl
+```
+
+```{r}
+multi_best_param <- select_best(multi_spec_tbl)
+final_multinom <- finalize_workflow(multi_wf, multi_best_param)
+```
+
+```{r}
+multi_final_model <- finalize_model(multi_spec, multi_best_param) 
+```
+
+```{r}
+multi_final_workflow <- multi_wf %>% update_model(multi_final_model)
+```
+
+```{r}
+multi_fit <- fit(multi_final_workflow, data = train2)
+```
+
+```{r}
+pred_multinom <- 
+    predict(multi_fit, test2, type = 'prob') 
+pred_multinom %>% head()
+```
+
+# stacking
+
+```{r}
+library(doParallel)
+cores<-detectCores()/2
+cl <- makeCluster(cores)
+registerDoParallel(cl)
+
+credit_stacking <- 
+  stacks() %>% 
+  add_candidates(rf_res) %>% 
+  add_candidates(xgb_res) %>% 
+  add_candidates(multi_spec_tbl) %>% 
+  blend_predictions() %>% 
+  fit_members()
+
+result <- predict(credit_stacking, test2)
+```
+
+# Submit file {.tabset .tabset-fade}
+
+```{r, message=FALSE}
+submission <- read_csv(file.path(file_path, "sample_submission.csv"))
+
+sub_col <- names(submission)
+
+submission <- bind_cols(submission$index, pred_multinom)
+names(submission) <- sub_col
+
+write.csv(submission, row.names = FALSE,
+          "dacon_multi.csv")
+```
