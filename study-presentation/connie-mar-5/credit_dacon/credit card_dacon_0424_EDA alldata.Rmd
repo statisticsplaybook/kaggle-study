@@ -1,0 +1,678 @@
+---
+title: "credit card_dacon"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r cars}
+library(tidyverse)
+library(skimr)
+library(tidymodels)
+library(magrittr)
+
+train <- read.csv("dataset/train.csv", na.strings = c("","NA"))
+train %>% janitor::clean_names() ->train
+test <- read.csv("dataset/test.csv",na.strings = c("","NA"))
+test %>% janitor::clean_names() -> test
+
+names(train)
+dim(train)
+names(test)
+dim(test)
+
+alldata <- bind_rows(train, test)
+dim(alldata)
+
+skim(alldata)
+```
+
+* days_birth : -값은 무슨 의미인지. 연도도 아니고 무슨 값인지 모르겠음. 
+* days_employed : -값은 무슨 의미인지. 365일로 나눠서 연으로 살펴봐도 편할 듯
+* 카테고리형 features : child_num, flag_mobil, family_size, gender, car
+* house_type : 입력은 단답식인데, min/max가 있다니?
+* occyp_type : 전문직, 기술직, 사무직 등으로 나눌 수 있을 듯
+
+
+1) gender: 성별의 credit 분포
+```{r cars}
+alldata %>% filter(!is.na(credit)) %>%
+    ggplot(aes(x=credit), na.rm=TRUE)+
+    geom_bar()+
+    theme_bw()
+
+
+alldata %>% filter(!is.na(credit)) %>%
+    ggplot(aes(x=credit), na.rm=TRUE)+
+    geom_bar()+
+    facet_grid(.~gender)
+    theme_bw()
+
+##upsampling
+```
+
+2) days_birth: 나이별 신용 분포
+```{r cars}
+alldata %>% select(days_birth) %>% summary()
+
+alldata<-alldata %>%
+    mutate(days_birth_year = abs(ceiling(days_birth/360))) 
+
+alldata %>% select(days_birth_year) %>% summary()
+
+alldata %>% select(days_birth, days_birth_year, credit) %>% head()
+
+
+
+alldata %>% filter(!is.na(credit)) %>%
+    ggplot(aes(x=days_birth_year))+
+    geom_histogram()+
+    facet_grid(.~credit)
+
+
+alldata %>% head()
+
+
+```
+
+
+3) family_size, child_num, family_type, 
+
+```{r}
+
+alldata %>% select(family_size, child_num) %>% summary()
+
+
+alldata<-alldata %>%
+    mutate(parents_type= family_size - child_num)
+
+alldata %>% select(parents_type) %>% summary() #MAX=2
+
+
+alldata %>% filter(parents_type<0) #??? #index.14900 / 31375
+alldata %>% filter(parents_type==0) #5rows
+
+
+alldata$family_size <- ifelse(alldata$parents_type<0, 4,
+                              ifelse(alldata$parents_type==0, 2,
+                                     alldata$family_size))
+
+
+alldata %>% select(parents_type, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=parents_type,fill=as.factor(credit)),
+             position=position_dodge())+     
+    theme_bw()
+# 
+# 
+# skim(train)
+# 
+# train %>% filter(child_num > 4) 
+# 
+
+
+
+```
+
+
+parents_type=1인 경우는 미혼인 사람이거나 아이가 있어도 이혼한 경우,
+parents_type=2인 경우는 기혼가정이지만, 아이가 있을 수도 있고 없을 수도 있는 경우
+
+
+
+```{r}
+
+alldata %>% select(family_type, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=family_type, fill=as.factor(credit)),
+             position=position_dodge())+
+    theme_bw()
+
+# 
+```
+
+결혼 유무/타입에 대해서 credit 차이를 관찰하기에 샘플 수 차이가 너무 나기 때문에 family_type변수를 drop하고, 위에서 생성한 parents_type 변수를 이용해보는 건 어떨까
+
+
+
+4) occyp_type: 직업군과 수입의 관계/직업군과 신용의 관계 비교
+
+```{r}
+skim(alldata$occyp_type) #complete rating 0.69/ missing rating 0.31
+
+
+
+alldata %>% filter(!is.na(occyp_type)) %>% 
+    group_by(occyp_type) %>% 
+    summarise(income_total=mean(income_total)) %>% 
+    ggplot(aes(x=occyp_type, y=income_total))+
+    geom_bar(stat = 'identity')+
+    theme_bw()+
+    theme(axis.text.x=element_text(angle=90, hjust=1))
+
+
+
+
+alldata %>% filter(!is.na(occyp_type)&!is.na(credit)) %>% 
+    select(c(occyp_type, credit)) %>% # 직업타입별, 신용도 살펴보기
+    ggplot(aes(x=occyp_type,  fill=as.factor(credit)))+
+    geom_bar(position=position_dodge())+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    theme(axis.text.x = element_text(angle=90, hjust=1))
+
+
+
+
+
+alldata %>% filter(!is.na(occyp_type)&!is.na(credit)) %>% 
+    select(c(occyp_type, credit)) %>% # 직업타입별, 신용도 살펴보기
+    ggplot(aes(x=occyp_type,  fill=as.factor(credit)))+
+    geom_bar(position="fill")+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    theme(axis.text.x = element_text(angle=90, hjust=1))+
+    geom_text(data=. %>%
+                  group_by(occyp_type, credit) %>%
+                  tally() %>%
+                  mutate(p=n/sum(n)) %>%
+                  ungroup(),
+              aes(y=p, label=scales::percent(round((p),1))),
+              position=position_stack(vjust = 0.003),
+              show.legend=FALSE)
+
+
+
+#직업간의 sample 수 편차가 심한 듯     
+    
+```
+
+5) days_employed, income_type, income_total
+
+```{r}
+
+
+alldata <- alldata %>%
+    mutate(year_employed = round(days_employed/360,digit=2)) 
+
+alldata %>% filter(year_employed>0) %>% summary()
+alldata %>% filter(year_employed>0&days_birth_year<40)
+alldata %>% filter(year_employed==0)
+
+alldata %>% filter(year_employed>0) %>%
+    select(income_type, income_total, year_employed,
+           occyp_type) %>%
+    summary()# 365243, year=1015
+
+alldata %>% filter(year_employed>0) %>% count()
+
+alldata$occyp_type<- ifelse(alldata$year_employed>0, "Pensioner",
+                            alldata$occyp_type)
+alldata$occyp_type %>% skim()
+
+```
+
+
+
+```{r}
+
+#occyp_type 나머지 NA값들의 income_type은 뭘지 궁금해서 
+
+alldata %>% filter(is.na(occyp_type)) %>%
+    select(income_type, edu_type, year_employed, days_birth_year, work_phone)
+
+
+alldata %>% filter(is.na(occyp_type)) %>%
+    select(income_type) %>%
+    ggplot()+
+    geom_bar(aes(x=income_type))
+
+
+alldata %>%  
+    select(c(occyp_type, income_type)) %>% # 직업타입별, 신용도 살펴보기
+    ggplot(aes(x=occyp_type,  fill=income_type))+
+    geom_bar(position=position_dodge(0.7))+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    theme(axis.text.x = element_text(angle=90, hjust=1))
+
+
+alldata %>% filter(income_type=="Student") %>% select(income_type, occyp_type, credit)
+# alldata$occyp_type <- ifelse((alldata$income_type=="Student") & (alldata$occyp_type==NA, 
+#                              alldata$occyp_type=="Core staff", 
+#                              alldata$occyp_type)
+
+
+alldata %>% filter(income_type=="Student")
+
+
+```
+
+
+income_type별 평균 수입
+
+```{r}
+
+alldata %>% select(income_type, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=income_type, fill=as.factor(credit)),position=position_dodge())+
+    theme_bw()
+
+
+alldata %>% filter(income_type=="Student")
+
+
+
+alldata %>% select(income_type, income_total) %>%
+    group_by(income_type) %>% summarise(income_total=mean(income_total)) 
+
+
+alldata %>% filter(!is.na(income_type)&!is.na(credit)) %>% 
+    select(c(income_type, credit)) %>%
+    ggplot(aes(x=income_type,  fill=as.factor(credit)))+
+    geom_bar(position="fill")+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    theme(axis.text.x = element_text(angle=90, hjust=1))+
+    geom_text(data=. %>%
+                  group_by(income_type, credit) %>%
+                  tally() %>%
+                  mutate(p=n/sum(n)) %>%
+                  ungroup(),
+              aes(y=p, label=scales::percent(round((p),1))),
+              position=position_stack(vjust = 0.003),
+              show.legend=FALSE)
+
+
+```
+
+
+
+6) car, reality, income_total 
+
+자산이 많을수록 신용도가 좋을지 살펴보고 싶어서, column을 만들어보기
+연간소득이 0인 자료는 없음.
+
+
+
+```{r}
+
+alldata$income_total %>% summary()
+
+alldata %>% filter(income_total == 0)
+alldata %>% filter(income_total < 0)
+
+#reality type에 오류가 있는지 한 번 확인. 
+#house_type rent인데, reality yes인 사람이 있을까
+
+alldata %>% filter(house_type=="Rented apartment"& reality == "Y")
+
+
+```
+
+
+asset grade
+차가 있고, 부동산이 있고, 소득이 있는 사람 = 0,
+차가 없고, 부동산이 있고, 소득이 있는 사람 = 1,
+차가 있고, 부동산이 없고, 소득이 있는 사람 = 2,
+차가 없고, 부동산이 없고, 소득만 있는 사람 = 3
+
+
+```{r}
+
+
+alldata %>% mutate(asset_grade= case_when(
+    car=="Y" & reality =="Y" ~ 0,
+    car=="N" & reality =="Y" ~ 1,
+    car=="Y" & reality =="N" ~ 2,
+    car=="N" & reality =="N" ~ 3
+)) ->alldata
+
+
+alldata %>% select(asset_grade, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=asset_grade, fill=as.factor(credit)), position = position_dodge())+
+    theme_bw()
+
+
+alldata %>% filter(!is.na(credit)) %>% 
+    select(c(asset_grade, credit)) %>%
+    ggplot(aes(x=asset_grade,  fill=as.factor(credit)))+
+    geom_bar(position="fill")+
+    theme_bw()+
+    scale_fill_brewer(palette="Pastel1")+
+    geom_text(data=. %>%
+                  group_by(asset_grade, credit) %>%
+                  tally() %>%
+                  mutate(p=n/sum(n)) %>%
+                  ungroup(),
+              aes(y=p, label=scales::percent(round((p),1))),
+              position=position_stack(vjust = 0.003),
+              show.legend=FALSE)
+
+
+
+
+```
+
+
+```{r}
+
+alldata %>% select(house_type, credit) %>%
+    ggplot()+
+    geom_bar(aes(x=house_type, fill = as.factor(credit)), position=position_dodge())
+
+
+```
+
+
+```{r}
+
+alldata %>% filter(house_type=="Rented apartment")
+
+alldata %>% filter(house_type=="Co-op apartment")
+
+alldata %>% select(house_type, reality) %>%
+    group_by(house_type, reality) %>% summarise(n=n()) ->p
+
+
+p %>% ggplot()+
+    geom_bar(aes(x=house_type,fill=reality, y=n),
+             stat = 'identity', 
+             position = position_dodge())+theme_bw()
+
+```
+
+With_parents, Municipal apartment, Office apartment의 경우는 부동산을 소유하고 있지 않은 사람의 비중이 좀 더 많다는 것을 알 수 있다.  
+
+
+
+7) begin_month
+
+```{r}
+
+
+alldata %>% filter(!is.na(credit)) %>%
+    ggplot()+
+    geom_bar(aes(x=begin_month))+
+    facet_grid(.~credit)
+    
+
+
+
+```
+
+
+
+
+
+### 정리
+
+1) 기본적으로 credit 간의 sample 수 차이가 심하다 -> 종헌님: upsampling
+2) 직업타입(occyp_type)별로 credit 분포의 차이가 뚜렷한 직군이 몇 개 있다.
+
+
+
+
+
+
+
+
+
+
+### modeling - recipe
+```{r}
+
+
+library(themis)
+library(recipes)
+```
+
+
+
+```{r}
+
+# sort(table(train$credit, useNA="always"))
+# 
+
+
+train_index <- seq_len(nrow(train))
+train2 <- alldata[train_index,]
+test2 <- alldata[-train_index,]
+
+names(train2)
+
+# train2 <- train2 %>% select(-c(index, flag_mobil, work_phone, phone, email, year_employed))
+# test2 <- test2 %>% select(-c(index, flag_mobil, work_phone, phone, email, year_employed))
+
+
+
+train2_rec <- train2 %>% recipe(credit~., ) %>%
+    step_mutate(credit=as.factor(credit)) %>%
+    step_rm(index, days_birth_year, income_type) %>%
+    step_unknown(occyp_type) %>%
+    step_integer(all_nominal(), -all_outcomes()) %>%
+    step_center(all_predictors(), -all_outcomes()) %>%
+    prep(training=train2)
+
+# 
+#     step_upsample(credit, over_ratio = 0.5) %>%
+
+
+train2_rec
+
+
+```
+
+
+
+
+
+
+```{r}
+
+# 
+# table(bake(alldata_rec, new_data=NULL)$credit, useNA="always")
+# 
+
+train2_juice <- juice(train2_rec)
+test2_bake <- bake(train2_rec, new_data=test2)
+
+
+train2_juice %>% head()
+test2_bake %>% head()
+
+
+
+
+# baked_train <- bake(train_rec, new_data=train)
+# table(baked_train$credit, useNA="always")
+
+
+train2_juice %>% map_df(~sum(is.na(.))) %>%
+    pivot_longer(cols=everything(),
+                 names_to="variable",
+                 values_to="na_count") %>%
+    filter(na_count>0)
+
+
+```
+
+
+```{r}
+cores <- parallel::detectCores()-1
+cores
+
+
+tune_spec <- rand_forest(mtry = tune(),
+                         min_n = tune(),
+                         trees = 300) %>% 
+    set_engine("ranger",
+               num.threads = cores) %>% 
+    set_mode("classification")
+
+
+param_grid <- tibble(mtry = 3, min_n = 5)
+
+```
+
+
+
+
+```{r}
+workflow <-workflow() %>%
+    add_model(tune_spec) %>%
+    add_formula(credit~.)
+
+
+workflow
+```
+
+
+
+
+
+
+```{r}
+library(tictoc)
+
+set.seed(123)
+validation_split <- validation_split(train2_juice,
+                                     prop = 0.7,
+                                     strata = credit)
+
+
+tic()
+tune_result <- workflow %>%
+    tune_grid(validation_split,
+              grid=param_grid,
+              metrics=metric_set(mn_log_loss))
+toc()
+
+```
+
+
+
+```{r}
+tune_result %>%
+    collect_metrics()
+
+
+```
+
+
+```{r}
+tune_result %>% show_best()
+
+
+tune_best <- tune_result %>% select_best(metric = "mn_log_loss")
+tune_best$mtry
+tune_best$min_n
+
+
+```
+
+
+```{r}
+rf_model <- rand_forest(mtry = tune_best$mtry,
+                        min_n=tune_best$min_n,
+                        trees=300) %>%
+    set_engine("ranger", seed=123,
+               num.threads=cores,importance='impurity') %>%
+    set_mode("classification")
+
+
+
+
+
+
+```
+
+
+```{r}
+tictoc::tic()
+rf_fit <- rf_model %>%
+    fit(credit~., data=train2_juice)
+tictoc::toc()
+
+options(max.print=10)
+rf_fit
+
+
+
+# 7.22 sec elapsed
+# parsnip model object
+# 
+# Fit time:  6.3s 
+# Ranger result
+# 
+# Call:
+#  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~tune_best$mtry,      x), num.trees = ~300, min.node.size = min_rows(~tune_best$min_n,      x), seed = ~123, num.threads = ~cores, verbose = FALSE, probability = TRUE) 
+# 
+# Type:                             Probability estimation 
+# Number of trees:                  300 
+# Sample size:                      26457 
+# Number of independent variables:  18 
+# Mtry:                             3 
+# Target node size:                 5 
+# Variable importance mode:         none 
+# Splitrule:                        gini 
+# OOB prediction error (Brier s.):  0.2301916 
+
+
+
+
+```
+
+```{r}
+
+result <- predict(rf_fit, test2_bake, type="prob")
+result %>% head()
+
+
+
+```
+
+
+
+
+```{r}
+submission <- read_csv("dataset/sample_submission.csv")
+sub_col <- names(submission)
+
+
+submission <- bind_cols(submission$index, result)
+
+names(submission) <- sub_col
+write.csv(submission, row.names=FALSE,
+          "baseline_credit_drop(income_type)_4.csv")
+
+
+```
+
+
+```{r}
+names(rf_fit)
+
+
+names(rf_fit$modelInfo)
+
+
+VarImp(rf_model)
+
+variable.names(rf_fit)
+
+
+```
+
+
+
+
+
+
+
