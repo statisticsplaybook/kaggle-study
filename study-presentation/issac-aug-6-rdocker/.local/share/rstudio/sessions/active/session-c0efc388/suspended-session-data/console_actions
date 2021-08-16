@@ -1,0 +1,30 @@
+{
+    "type": [
+        2,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        3,
+        3,
+        3,
+        3,
+        3
+    ],
+    "data": [
+        "\nR version 4.0.5 (2021-03-31) -- \"Shake and Throw\"\nCopyright (C) 2021 The R Foundation for Statistical Computing\nPlatform: x86_64-pc-linux-gnu (64-bit)\n\nR is free software and comes with ABSOLUTELY NO WARRANTY.\nYou are welcome to redistribute it under certain conditions.\nType 'license()' or 'licence()' for distribution details.\n\nR is a collaborative project with many contributors.\nType 'contributors()' for more information and\n'citation()' on how to cite R or R packages in publications.\n\nType 'demo()' for some demos, 'help()' for on-line help, or\n'help.start()' for an HTML browser interface to help.\nType 'q()' to quit R.\n\n",
+        "> ",
+        "x <- c(1:10)",
+        "> ",
+        "y <- x^2",
+        "> ",
+        "plot(x, y)",
+        "Warning message:\n",
+        "In grSoftVersion() :",
+        "\n ",
+        " unable to load shared object '/usr/local/lib/R/modules//R_X11.so':\n  libXt.so.6: cannot open shared object file: No such file or directory\n",
+        "15 Aug 2021 02:47:13 [rsession-rstudio] ERROR r error 4 (R code execution error) [errormsg: ]; OCCURRED AT rstudio::core::Error rstudio::r::exec::executeSafely(rstudio_boost::function<void()>) src/cpp/r/RExec.cpp:239; LOGGED FROM: void rstudio::session::{anonymous}::processEvents() src/cpp/session/SessionHttpMethods.cpp:99\n"
+    ]
+}

@@ -1,0 +1,314 @@
+---
+title: ".blue[R] Docker 소개"
+subtitle: "Docker, 너란 놈"
+author: "Issac Lee"
+institute: "슬기로운통계생활"
+date: "Presentation Date"
+output:
+  xaringan::moon_reader:
+    css: 
+      - default
+      - css/statisticsplaybook.css
+      - css/statisticsplaybook-fonts.css
+    lib_dir: libs
+    seal: false
+    nature:
+      highlightStyle: googlecode
+      highlightLines: true
+      highlightLanguage: ["r"]
+      countIncrementalSlides: false
+      ratio: "16:9"
+    includes:
+      after_body: [css/insert-logo.html]
+---
+
+```{r setup, include = FALSE}
+library(knitr)
+library(tidyverse)
+library(xaringanExtra)
+xaringanExtra::use_panelset()
+# set default options
+opts_chunk$set(dpi = 300)
+```
+
+class: title-slide, left, top
+
+# `r rmarkdown::metadata$title`
+----
+## **`r rmarkdown::metadata$subtitle`**
+### [`r rmarkdown::metadata$institute`](https://www.youtube.com/c/statisticsplaybook)
+### `r rmarkdown::metadata$author`
+
+---
+class: middle, center
+
+# 도커(Docker) 훑어보기.
+
+```{r , echo=FALSE, fig.cap="", fig.align='center', out.width = '35%'}
+knitr::include_graphics("https://developers.redhat.com/sites/default/files/styles/article_feature/public/blog/2014/05/homepage-docker-logo.png?itok=zx0e-vcP")
+```
+
+도커 버전 .blue[[3.5.1](https://docs.docker.com/docker-for-windows/release-notes/)]을 기준으로 설명합니다.
+
+---
+# 도커 이미지 만들기
+
+.left-column[
+
+]
+.right-column[
+### `Dockerfile`
+
+* 어떻게 컴퓨터를 구성할 것인지 레시피가 적혀있는 파일
+
+* `test.R` 파일을 만들고 다음과 같이 코드를 넣어놓자.
+
+`print("hello Rorker!")`
+
+* 아래와 같이 `Dockerfile`을 만든다.
+
+```{r eval=FALSE}
+FROM r-base:4.0.3
+COPY ./test.R /home
+WORKDIR /home
+CMD Rscript "test.R"
+```
+
+]
+
+---
+# 도커 이미지 내용 살펴보기
+
+.left-column[
+
+]
+.right-column[
+### Docker Hub
+
+.pull-left[
+
+* 도커 이미지 저장소
+
+* r-base:4.0.3이 설치되어 있는 가상 컴퓨터 이미지
+
+* 현재 폴더의 `test.R` 파일을 가상 컴퓨터 myscripts 폴더에 복사
+
+* `Rscript "test.R"`이라는 명령어를 실행해줘
+
+]
+.pull-right[
+
+```{r , echo=FALSE, fig.cap="", out.height = '95%'}
+knitr::include_graphics("https://about.gitlab.com/images/devops-tools/docker-hub-logo.png")
+```
+
+]
+
+]
+---
+# 도커 이미지를 구워보자.
+
+.left-column[
+
+]
+.right-column[
+
+### Docker `build` 명령어의 사용
+
+* 터미널을 사용하여 `Dockerfile`이 있는 곳으로 이동
+
+* `docker build -t hello-rocker .`
+
+* `-t`는 태그 옵션을 의미
+
+* `.` 는 현재 폴더에 `Dockerfile`이 들어있다는 것을 의미
+
+### 결과 확인
+
+* `docker image ls`를 사용하여 부여된 태그를 가진 image가 있는지 확인한다.
+
+]
+
+---
+# Hello-rocker! 실행하기
+
+.left-column[
+
+]
+.right-column[
+### `hello-rocker` image로 가상 컴퓨터 만들기
+
+* 문법: `docker run hello-rocker`
+
+* 이렇게 만든 가상 컴퓨터를 컨테이너 (container) 라고 부름.
+
+]
+
+---
+# 도커 허브의 필요성
+
+.left-column[
+
+]
+.right-column[
+### `pull` 명령어
+
+* 남들이 만들어 놓은 도커 이미지 다운 받기
+
+* 특정 버전의 R이 깔려있는 작업환경을 그대로 받아올 수 있음.
+
+```{r eval=FALSE}
+# r 4.0.5 version with Rstudio
+docker pull rocker/rstudio:4.0.5
+```
+
+
+]
+
+---
+# 도커 파일 실행하기 (Run)
+
+.left-column[
+
+]
+.right-column[
+### 생성한 image에서 컨테이너 돌리기
+
+* 문법: `docker run [OPTIONS] IMAGE[:TAG]`
+
+* 예: `docker run -d -p 7009:8787 rocker/rstudio:3.4.1`
+
+* rocker/rstudio라는 이미지 중 3.4.1 태그가 달린 이미지를 사용해서 컨테이너를 생성하고, 포트 8787의 앱을 로컬의 7009 포트로 연결해줘
+
+]
+
+---
+# 주요 Docker command
+
+.left-column[
+
+]
+.right-column[
+### Detached mode
+
+* `-d=TRUE` or `-d`
+
+  * 도커 컨테이너가 terminal 뒤 쪽에서 계속 돌아가도록 하게끔 해주는 옵션
+
+### GPU 정보 제공
+
+* `--gpus`
+
+  * 도커 컨테이너에 GPU 카드를 제공 할 것인지에 대한 옵션
+
+  * 모든 GPU 정보를 넘길 때 `--gpus all`
+]
+
+---
+# 주요 Docker commands
+
+.left-column[
+
+]
+.right-column[
+### 포트 설정 
+
+* `--publish` or `-p`
+
+  * 도커 컨테이너를 외부에 공개하는 포트 설정
+
+  * 앞에 숫자가 로컬, 뒤에 숫자가 컨테이너
+
+  * `7008:8787`의 의미: 컨테이너의 8787 포트의 내용을 로컬 7008 포트로 공개
+
+### Interactive mode
+
+* `--interactive + --tty` or `-it`
+
+* 컨테이너에서 안에서 명령어를 사용해서 조작하고 싶을때
+
+]
+
+---
+# 주요 Docker commands
+
+.left-column[
+
+]
+.right-column[
+### 자동 Shutdown
+
+* `--rm`
+
+  * 컨테이너에서 빠져나오면 자동 종료해줌.
+
+### 환경변수 전달
+
+* `--env` or `-e`
+
+  * 컨테이너에서 접근할 수 있는 변수 설정
+
+  * `-e USERID=issac` 생성된 컨테이너의 USERID 변수를 만들고, 그 값을 issac으로 설정함
+
+]
+
+---
+# 주요 Docker commands
+
+.left-column[
+
+]
+.right-column[
+### 저장 공간 연결
+
+* `--volume` or `-v`
+
+* 로컬의 저장공간과 컨테이너의 저장공간을 연결
+
+* `-v $(pwd):/work` 로컬에서 명령어가 실행되는 현재 폴더를 컨테이너의 `/work` 폴더와 연결하기
+
+* 윈도우 powershell에서는 `${pwd}`으로 변수를 불러옴에 주의!
+
+### 컨테이너 이름 붙이기
+
+* `--name`
+
+* 생성되는 컨테이너에 이름 붙여주기
+
+]
+
+---
+# 실전 도커 실행하기
+
+.left-column[
+
+]
+.right-column[
+### 문제
+
+다음의 도커 명령어를 해석해보세요!
+
+```{r eval=FALSE}
+docker run -d -p 8787:8787 -v ${pwd}\data:/home/rstudio -e PASSWORD=random --name myfirst-rstudio-docker rocker/rstudio:4.0.5
+```
+
+### 컨테이너 확인
+
+```{r eval=FALSE}
+# current containers
+docker ps
+# interactive section in the container
+docker exec -it containerID /bin/bash
+```
+
+
+]
+
+---
+## 참고자료
+
+[1] [rocker 프로젝트](https://www.rocker-project.org/)
+
+[2] [Window Docker volume reference](https://github.com/OpenDroneMap/ODM/issues/591)
+
+[3] [Docker r-base image](https://hub.docker.com/_/r-base)

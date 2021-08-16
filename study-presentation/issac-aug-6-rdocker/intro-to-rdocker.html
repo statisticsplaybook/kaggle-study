@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>.blue[R] Docker 소개</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Issac Lee" />
+    <script src="libs/header-attrs-2.10/header-attrs.js"></script>
+    <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
+    <link href="libs/panelset-0.2.6/panelset.css" rel="stylesheet" />
+    <script src="libs/panelset-0.2.6/panelset.js"></script>
+    <link rel="stylesheet" href="css/statisticsplaybook.css" type="text/css" />
+    <link rel="stylesheet" href="css/statisticsplaybook-fonts.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+
+
+
+
+class: title-slide, left, top
+
+# .blue[R] Docker 소개
+----
+## **Docker, 너란 놈**
+### [슬기로운통계생활](https://www.youtube.com/c/statisticsplaybook)
+### Issac Lee
+
+---
+class: middle, center
+
+# 도커(Docker) 훑어보기.
+
+&lt;img src="https://developers.redhat.com/sites/default/files/styles/article_feature/public/blog/2014/05/homepage-docker-logo.png?itok=zx0e-vcP" width="35%" style="display: block; margin: auto;" /&gt;
+
+도커 버전 .blue[[3.5.1](https://docs.docker.com/docker-for-windows/release-notes/)]을 기준으로 설명합니다.
+
+---
+# 도커 이미지 만들기
+
+.left-column[
+
+]
+.right-column[
+### `Dockerfile`
+
+* 어떻게 컴퓨터를 구성할 것인지 레시피가 적혀있는 파일
+
+* `test.R` 파일을 만들고 다음과 같이 코드를 넣어놓자.
+
+`print("hello Rorker!")`
+
+* 아래와 같이 `Dockerfile`을 만든다.
+
+
+```r
+FROM r-base:4.0.3
+COPY ./test.R /home
+WORKDIR /home
+CMD Rscript "test.R"
+```
+
+]
+
+---
+# 도커 이미지 내용 살펴보기
+
+.left-column[
+
+]
+.right-column[
+### Docker Hub
+
+.pull-left[
+
+* 도커 이미지 저장소
+
+* r-base:4.0.3이 설치되어 있는 가상 컴퓨터 이미지
+
+* 현재 폴더의 `test.R` 파일을 가상 컴퓨터 myscripts 폴더에 복사
+
+* `Rscript "test.R"`이라는 명령어를 실행해줘
+
+]
+.pull-right[
+
+&lt;img src="https://about.gitlab.com/images/devops-tools/docker-hub-logo.png" height="95%" /&gt;
+
+]
+
+]
+---
+# 도커 이미지를 구워보자.
+
+.left-column[
+
+]
+.right-column[
+
+### Docker `build` 명령어의 사용
+
+* 터미널을 사용하여 `Dockerfile`이 있는 곳으로 이동
+
+* `docker build -t hello-rocker .`
+
+* `-t`는 태그 옵션을 의미
+
+* `.` 는 현재 폴더에 `Dockerfile`이 들어있다는 것을 의미
+
+### 결과 확인
+
+* `docker image ls`를 사용하여 부여된 태그를 가진 image가 있는지 확인한다.
+
+]
+
+---
+# Hello-rocker! 실행하기
+
+.left-column[
+
+]
+.right-column[
+### `hello-rocker` image로 가상 컴퓨터 만들기
+
+* 문법: `docker run hello-rocker`
+
+* 이렇게 만든 가상 컴퓨터를 컨테이너 (container) 라고 부름.
+
+]
+
+---
+# 도커 허브의 필요성
+
+.left-column[
+
+]
+.right-column[
+### `pull` 명령어
+
+* 남들이 만들어 놓은 도커 이미지 다운 받기
+
+* 특정 버전의 R이 깔려있는 작업환경을 그대로 받아올 수 있음.
+
+
+```r
+# r 4.0.5 version with Rstudio
+docker pull rocker/rstudio:4.0.5
+```
+
+
+]
+
+---
+# 도커 파일 실행하기 (Run)
+
+.left-column[
+
+]
+.right-column[
+### 생성한 image에서 컨테이너 돌리기
+
+* 문법: `docker run [OPTIONS] IMAGE[:TAG]`
+
+* 예: `docker run -d -p 7009:8787 rocker/rstudio:3.4.1`
+
+* rocker/rstudio라는 이미지 중 3.4.1 태그가 달린 이미지를 사용해서 컨테이너를 생성하고, 포트 8787의 앱을 로컬의 7009 포트로 연결해줘
+
+]
+
+---
+# 주요 Docker command
+
+.left-column[
+
+]
+.right-column[
+### Detached mode
+
+* `-d=TRUE` or `-d`
+
+  * 도커 컨테이너가 terminal 뒤 쪽에서 계속 돌아가도록 하게끔 해주는 옵션
+
+### GPU 정보 제공
+
+* `--gpus`
+
+  * 도커 컨테이너에 GPU 카드를 제공 할 것인지에 대한 옵션
+
+  * 모든 GPU 정보를 넘길 때 `--gpus all`
+]
+
+---
+# 주요 Docker commands
+
+.left-column[
+
+]
+.right-column[
+### 포트 설정 
+
+* `--publish` or `-p`
+
+  * 도커 컨테이너를 외부에 공개하는 포트 설정
+
+  * 앞에 숫자가 로컬, 뒤에 숫자가 컨테이너
+
+  * `7008:8787`의 의미: 컨테이너의 8787 포트의 내용을 로컬 7008 포트로 공개
+
+### Interactive mode
+
+* `--interactive + --tty` or `-it`
+
+* 컨테이너에서 안에서 명령어를 사용해서 조작하고 싶을때
+
+]
+
+---
+# 주요 Docker commands
+
+.left-column[
+
+]
+.right-column[
+### 자동 Shutdown
+
+* `--rm`
+
+  * 컨테이너에서 빠져나오면 자동 종료해줌.
+
+### 환경변수 전달
+
+* `--env` or `-e`
+
+  * 컨테이너에서 접근할 수 있는 변수 설정
+
+  * `-e USERID=issac` 생성된 컨테이너의 USERID 변수를 만들고, 그 값을 issac으로 설정함
+
+]
+
+---
+# 주요 Docker commands
+
+.left-column[
+
+]
+.right-column[
+### 저장 공간 연결
+
+* `--volume` or `-v`
+
+* 로컬의 저장공간과 컨테이너의 저장공간을 연결
+
+* `-v $(pwd):/work` 로컬에서 명령어가 실행되는 현재 폴더를 컨테이너의 `/work` 폴더와 연결하기
+
+* 윈도우 powershell에서는 `${pwd}`으로 변수를 불러옴에 주의!
+
+### 컨테이너 이름 붙이기
+
+* `--name`
+
+* 생성되는 컨테이너에 이름 붙여주기
+
+]
+
+---
+# 실전 도커 실행하기
+
+.left-column[
+
+]
+.right-column[
+### 문제
+
+다음의 도커 명령어를 해석해보세요!
+
+
+```r
+docker run -d -p 8787:8787 -v ${pwd}\data:/home/rstudio -e PASSWORD=random --name myfirst-rstudio-docker rocker/rstudio:4.0.5
+```
+
+### 컨테이너 확인
+
+
+```r
+# current containers
+docker ps
+# interactive section in the container
+docker exec -it containerID /bin/bash
+```
+
+
+]
+
+---
+## 참고자료
+
+[1] [rocker 프로젝트](https://www.rocker-project.org/)
+
+[2] [Window Docker volume reference](https://github.com/OpenDroneMap/ODM/issues/591)
+
+[3] [Docker r-base image](https://hub.docker.com/_/r-base)
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "googlecode",
+"highlightLines": true,
+"highlightLanguage": "r",
+"countIncrementalSlides": false,
+"ratio": "16:9"
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+<!--Hat-tip: https://www.garrickadenbuie.com/blog/xaringan-tip-logo-all-slides/-->
+<style>
+.logo {
+  background-image: url(img/logo-blue.png);
+  background-size: contain;
+  background-repeat: no-repeat;
+  position: absolute;
+  top: 1em;
+  right: 1em;
+  width: 110px;
+  height: 128px;
+  z-index: 0;
+}
+</style>
+
+<script>
+document
+  .querySelectorAll(
+    '.remark-slide-content' +
+    ':not(.title-slide)' +
+    // add additional classes to exclude here, e.g.
+    ':not(.inverse)' +
+    ':not(.hide-logo)'
+  )
+  .forEach(el => {
+    el.innerHTML += '<div class="logo"></div>';
+  });
+</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
