@@ -142,7 +142,14 @@ class: center, middle
 
 * 8월 22일: 돈돈님(샤이니), 종헌님(선호도 조사, 추천시스템)
 
-* 8월 29일: 
+* 8월 29일: 상훈님(블로그 다운), 성호님 (SQL & R 연동 소개, dbplyr)
+
+* 9월 12일: 돈돈님(packrat, pacman, renv 사용법), 코니님(highcharter~!)
+
+* 9월 
+
+
+
 ---
 
 class: center, middle
